@@ -1,0 +1,7 @@
+/.venv/
+/data/raw/
+/data/processed/
+/artifacts/evaluation/
+/artifacts/models/
+/artifacts/mlflow/
+__pycache__/
