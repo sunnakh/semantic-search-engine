@@ -1,5 +1,7 @@
 import unittest
 from importlib.util import find_spec
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from src.documents import Document
 
@@ -54,3 +56,19 @@ class DenseIndexTests(unittest.TestCase):
             self.index.rank_queries(["zero"])
         with self.assertRaisesRegex(ValueError, "same dimension"):
             self.index.rank_queries(["wrong dimension"])
+
+    def test_saved_index_replays_rankings_and_rejects_altered_dimensions(self) -> None:
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "index"
+            self.index.save(directory)
+            restored = DenseIndex.load(directory, FixtureEncoder())
+            self.assertEqual(
+                restored.rank_queries(["query"]), self.index.rank_queries(["query"])
+            )
+            np.save(
+                directory / "vectors.npy",
+                np.ones((1, 3), dtype=np.float32),
+                allow_pickle=False,
+            )
+            with self.assertRaisesRegex(ValueError, "one normalized float32 vector"):
+                DenseIndex.load(directory, FixtureEncoder())

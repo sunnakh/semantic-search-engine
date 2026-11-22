@@ -1,5 +1,6 @@
 """MiniLM embeddings and exact cosine retrieval."""
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -21,17 +22,29 @@ class Encoder(Protocol):
     def encode(self, texts: list[str]) -> NDArray[np.float32]: ...
 
 
+def load_minilm(directory: Path | None = None) -> SentenceTransformer:
+    if directory is not None and not directory.is_dir():
+        raise ValueError(f"saved encoder directory is missing: {directory}")
+    model = SentenceTransformer(
+        MODEL_ID if directory is None else str(directory),
+        revision=MODEL_REVISION if directory is None else None,
+        local_files_only=directory is not None,
+        device="cpu",
+        cache_folder=str(MODEL_CACHE),
+        trust_remote_code=False,
+        model_kwargs={"use_safetensors": True},
+    )
+    model.max_seq_length = MAX_SEQUENCE_LENGTH
+    return model
+
+
+def embedding_text(document: Document) -> str:
+    return f"{document.title} {document.text}".strip()
+
+
 class MiniLMEncoder:
-    def __init__(self) -> None:
-        self._model = SentenceTransformer(
-            MODEL_ID,
-            revision=MODEL_REVISION,
-            device="cpu",
-            cache_folder=str(MODEL_CACHE),
-            trust_remote_code=False,
-            model_kwargs={"use_safetensors": True},
-        )
-        self._model.max_seq_length = MAX_SEQUENCE_LENGTH
+    def __init__(self, model: SentenceTransformer | None = None) -> None:
+        self._model = load_minilm() if model is None else model
 
     def encode(self, texts: list[str]) -> NDArray[np.float32]:
         return np.asarray(
@@ -70,8 +83,42 @@ class DenseIndex:
         self._encoder = encoder
         self._vectors = unit_embeddings(
             encoder,
-            [f"{document.title} {document.text}".strip() for document in ordered],
+            [embedding_text(document) for document in ordered],
         )
+
+    def save(self, directory: Path) -> None:
+        directory.mkdir(parents=True)
+        np.save(directory / "vectors.npy", self._vectors, allow_pickle=False)
+        (directory / "document_ids.json").write_text(
+            json.dumps(self._ids) + "\n", encoding="utf-8", newline="\n"
+        )
+
+    @classmethod
+    def load(cls, directory: Path, encoder: Encoder) -> "DenseIndex":
+        ids = json.loads((directory / "document_ids.json").read_text(encoding="utf-8"))
+        vectors = np.load(directory / "vectors.npy", allow_pickle=False)
+        if (
+            not isinstance(ids, list)
+            or not ids
+            or any(not isinstance(value, str) or not value for value in ids)
+            or sorted(set(ids)) != ids
+        ):
+            raise ValueError("dense index requires sorted unique document IDs")
+        if (
+            vectors.ndim != 2
+            or vectors.shape[0] != len(ids)
+            or not vectors.shape[1]
+            or vectors.dtype != np.float32
+            or not np.allclose(np.linalg.norm(vectors, axis=1), 1.0, rtol=1e-5)
+        ):
+            raise ValueError(
+                "dense index requires one normalized float32 vector per document"
+            )
+        index = cls.__new__(cls)
+        index._ids = ids
+        index._vectors = vectors
+        index._encoder = encoder
+        return index
 
     @property
     def dimensions(self) -> int:
