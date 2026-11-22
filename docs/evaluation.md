@@ -23,6 +23,7 @@ All methods ranked 5,183 abstracts for the same 162 validation queries in datase
 | TF-IDF cosine | 0.59845 | 0.65998 | 0.74228 | 0.56159 | 123 |
 | BM25 | 0.65699 | 0.69599 | 0.75617 | 0.63419 | 125 |
 | Pretrained MiniLM | 0.67623 | 0.76235 | 0.79938 | 0.64830 | 131 |
+| Fine-tuned MiniLM | 0.70171 | 0.77160 | 0.83333 | 0.67146 | 136 |
 
 BM25 improved mean nDCG@10 by 0.16682 over keyword overlap. Pretrained MiniLM improved mean nDCG@10 by a further 0.01924 over BM25. MiniLM scored higher than BM25 on 38 queries, lower on 24, and tied on 100.
 
@@ -31,3 +32,13 @@ nDCG@10 discounts each relevant hit by `1 / log2(rank + 1)` and divides by the i
 The official test benchmark is reserved for final evaluation. The prepared split audit records overlap between development and test claims that may affect interpretation of eventual test scores. [Data contract](data_contracts.md#prepared-snapshot)
 
 The sequence limit truncates long inputs. MiniLM's published training mixture includes S2ORC scientific text, so overlap between its training text and SciFact documents is possible. The reported metrics measure retrieval quality on this validation split. [MiniLM training data and input limits](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2#training-data)
+
+## Fine-tuned candidate
+
+Run `make train-candidate` after `make prepare`. The CPU run fine-tunes the pinned MiniLM encoder for one epoch with AdamW, a `1e-5` learning rate, batches of 16 judged pairs, a contrastive temperature of `0.05`, and seed `2026`. It excludes training IDs flagged by the prepared audit as exact normalized matches to official test claims. Validation and official test judgments are excluded from optimization.
+
+For each query, the loss increases the softmax probability assigned to all known relevant documents in the batch. The remaining in-batch documents supply contrastive negatives. An unjudged pair can still be relevant, so this objective has a known false-negative risk.
+
+The command saves and reloads the encoder, builds its corpus index, and reloads the index before scoring on validation. It publishes the encoder, index, comparison reports, and checksum manifest under `artifacts/models/candidates/<candidate_id>/`. The manifest records the prepared data version, training settings, base model revision, runtime versions, and source fingerprint. It records the Git commit when available.
+
+The first run used 739 training pairs across 646 queries and took 47 optimizer steps. The saved candidate improved validation nDCG@10 by 0.02548 over frozen MiniLM. It scored higher on 21 queries, lower on 5, and tied on 136.
