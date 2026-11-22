@@ -42,3 +42,15 @@ For each query, the loss increases the softmax probability assigned to all known
 The command saves and reloads the encoder, builds its corpus index, and reloads the index before scoring on validation. It publishes the encoder, index, comparison reports, and checksum manifest under `artifacts/models/candidates/<candidate_id>/`. The manifest records the prepared data version, training settings, base model revision, runtime versions, and source fingerprint. It records the Git commit when available.
 
 The first run used 739 training pairs across 646 queries and took 47 optimizer steps. The saved candidate improved validation nDCG@10 by 0.02548 over frozen MiniLM. It scored higher on 21 queries, lower on 5, and tied on 136.
+
+## Offline gate and MLflow registration
+
+Run `make pipeline` after `make prepare` to train a candidate, verify its bundle, and record the gate decision. The gate checks artifact hashes, the encoder and index dimensions, the indexed corpus, and the validation queries and judgments. It recomputes metrics from the stored rankings. To evaluate an existing bundle, run `uv run --locked --extra dense --extra registry python -m src.training.pipeline --candidate <candidate-manifest>`.
+
+The reference is the registered `champion` alias when available and frozen MiniLM otherwise. The nDCG@10 floor is the higher score from BM25 and the reference. The Recall@5 floor uses the higher reference or BM25 score with a 0.02 absolute tolerance. A reference report from a different prepared snapshot requires reevaluation before it can be compared.
+
+MLflow stores each attempt in the `scifact-candidates` experiment in `artifacts/mlflow/tracking.db`. Every gate decision records its result and reasons. Passing bundles are registered under `scifact-dense-retriever` with `status=candidate`. Repeating a gate attempt logs another run and reuses the registered version for the same candidate ID. Each registered model version contains an MLflow `MLmodel` descriptor and the exact saved encoder, index, manifest, and reports under `bundle/`. [MLflow Model Registry](https://mlflow.org/docs/latest/ml/model-registry/workflow/)
+
+Point MLflow clients at the local SQLite tracking and registry URI before resolving `models:/scifact-dense-retriever/1`. This version was registered at 0.70171 nDCG@10 and 0.77160 Recall@5. For a deliberate failure injection, negating the saved document vectors produced zero nDCG@10 and Recall@5 on the same validation split. The gate logged the rejection in MLflow and the registry stayed at one version.
+
+The CLI exits with `2` for a gate rejection and `1` for an execution error. Readiness, latency, shadow traffic, and activation are checked in the release and serving stages.
