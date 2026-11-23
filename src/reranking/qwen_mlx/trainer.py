@@ -1,7 +1,9 @@
 """QLoRA training loop for the local Qwen reranker."""
 
-import json
+from __future__ import annotations
+
 import importlib
+import json
 import subprocess
 import sys
 from importlib.metadata import version
@@ -9,7 +11,7 @@ from math import isfinite
 from pathlib import Path
 from tempfile import mkdtemp
 from time import perf_counter
-from typing import cast
+from typing import TYPE_CHECKING
 
 from ...data.integrity import manifest_digest, sha256_file
 from ...data.prepared import load_split
@@ -24,6 +26,10 @@ from .checkpoint import (
 )
 from .dataset import training_examples, training_groups
 from .scorer import RelevanceScorer
+
+if TYPE_CHECKING:
+    from mlx.core import array
+    from mlx.nn import Module
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -90,9 +96,7 @@ def train(
     model.freeze()
     linear_to_lora_layers(model, LAYERS, LORA_PARAMETERS)
     model.eval()
-    trainable = cast(
-        list[tuple[str, mx.array]], tree_flatten(model.trainable_parameters())
-    )
+    trainable: list[tuple[str, array]] = tree_flatten(model.trainable_parameters())
     if not trainable or any(".lora_" not in name for name, _ in trainable):
         raise RuntimeError("expected only LoRA adapter tensors to be trainable")
     parameter_count = sum(value.size for _, value in trainable)
@@ -105,7 +109,7 @@ def train(
     scorer = RelevanceScorer(tokenizer)
     optimizer = optim.AdamW(learning_rate=LEARNING_RATE)
 
-    def loss_fn(model: nn.Module, tokens: mx.array, label: int) -> mx.array:
+    def loss_fn(model: Module, tokens: array, label: int) -> array:
         logits = scorer.label_logits(model, tokens)
         return mx.logsumexp(logits) - logits[label]
 

@@ -153,10 +153,17 @@ MiniLM serving reached **25.3 ms warm server-side p95** on loopback across 150 r
 
 ## Verification and limitations
 
+GitHub Actions checks lint, formatting, types, and the test suite on pull requests and pushes to `main`. A separate job builds the API image and checks its entrypoint, non-root user, and CPU dependencies.
+
+Run the Python checks locally:
+
 ```sh
-MLFLOW_DISABLE_TELEMETRY=true uv run --locked --isolated \
-  --extra dense --extra registry --extra serving --extra ui \
-  python -m unittest discover -s tests
+uv sync --locked --extra dense --extra registry --extra serving --extra ui
+uv run --locked --no-sync ruff check src tests
+uv run --locked --no-sync ruff format --check src tests
+uv run --locked --no-sync mypy
+MLFLOW_DISABLE_TELEMETRY=true HF_HUB_OFFLINE=1 \
+  uv run --locked --no-sync python -m unittest discover -s tests
 ```
 
 - SciFact judgments cover a subset of relevant papers. In-batch negatives can include useful papers that lack a relevance judgment.
