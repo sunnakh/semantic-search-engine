@@ -82,12 +82,18 @@ def unit_embeddings(encoder: Encoder, texts: list[str]) -> NDArray[np.float32]:
 
 
 class DenseIndex:
-    def __init__(self, documents: Sequence[Document], encoder: Encoder) -> None:
+    def __init__(
+        self,
+        documents: Sequence[Document],
+        encoder: Encoder,
+        *,
+        query_encoder: Encoder | None = None,
+    ) -> None:
         if not documents:
             raise ValueError("dense index requires at least one document")
         ordered = sorted(documents, key=lambda document: document.document_id)
         self._ids = [document.document_id for document in ordered]
-        self._encoder = encoder
+        self._encoder = query_encoder if query_encoder is not None else encoder
         self._vectors = unit_embeddings(
             encoder,
             [embedding_text(document) for document in ordered],

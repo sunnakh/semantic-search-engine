@@ -54,3 +54,23 @@ MLflow stores each attempt in the `scifact-candidates` experiment in `artifacts/
 Point MLflow clients at the local SQLite tracking and registry URI before resolving `models:/scifact-dense-retriever/1`. This version was registered at 0.70171 nDCG@10 and 0.77160 Recall@5. For a deliberate failure injection, negating the saved document vectors produced zero nDCG@10 and Recall@5 on the same validation split. The gate logged the rejection in MLflow and the registry stayed at one version.
 
 The CLI exits with `2` for a gate rejection and `1` for an execution error. Readiness, latency, shadow traffic, and activation are checked in the release and serving stages.
+
+## Fine-tune the Qwen embedding model with LoRA
+
+From the project directory, run `make ingest && make prepare` if you need the prepared SciFact snapshot. Then run:
+
+```sh
+make train-qwen-embedding
+```
+
+This uses **LoRA** on the unquantized, pinned `Qwen/Qwen3-Embedding-0.6B` checkpoint. The base weights stay frozen in FP32. Training updates rank-8 adapters on the attention query and value projections. Defaults include one epoch, 8 claim–paper pairs per batch, a learning rate of `5e-5`, and Apple GPU acceleration when available. The first run may download approximately 1.1 GiB of model weights.
+
+For a short training check, use `make train-qwen-embedding QWEN_ARGS='--max-steps 2'`. For a full run, omit `--max-steps`. Use `--batch-size 4` if the default batch exceeds available memory.
+
+The command prints the path to the saved adapter's manifest. Pass that path to evaluation:
+
+```sh
+make evaluate-qwen-embedding QWEN_ARGS='--run artifacts/models/qwen-lora/REPLACE_WITH_RUN_ID/manifest.json'
+```
+
+Evaluation reloads the adapter and re-embeds the complete validation corpus. It compares nDCG@10 and Recall@5 with frozen Qwen using the same prepared snapshot, query instruction, and inference settings. It reuses a matching frozen report when present and builds one otherwise. If an existing report was generated with other settings, pass a new path with `--frozen-report`. Results go in `validation.json` and `comparison.json` beside the adapter manifest. This is a local experiment and the official test split stays reserved.
