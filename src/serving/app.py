@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
+from typing import get_args
 from uuid import uuid4
 
 import uvicorn
@@ -149,6 +150,11 @@ def create_app(
         ("method",),
         registry=metrics,
     )
+    # Publish zero samples so Prometheus can measure the first request.
+    for method in get_args(Method):
+        searches.labels(method=method, outcome="success")
+        latency.labels(method=method)
+    searches.labels(method="dense", outcome="fallback")
     worker_health = Gauge(
         "scifact_dense_ready", "Dense worker readiness", registry=metrics
     )

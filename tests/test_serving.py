@@ -111,6 +111,8 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request("/health/ready"))[0], 200)
 
     async def test_degraded_worker_uses_bm25_and_records_fallback(self) -> None:
+        counter = b'scifact_search_requests_total{method="dense",outcome="fallback"}'
+        self.assertIn(counter + b" 0.0", (await self.request("/metrics"))[1])
         self.dense.ready = False
         with self.assertLogs("scifact.predictions", level="INFO") as logs:
             status, body = await self.request(
@@ -126,7 +128,7 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"query_hash"', logs.output[0])
         self.assertEqual((await self.request("/health/live"))[0], 200)
         self.assertEqual((await self.request("/health/ready"))[0], 503)
-        self.assertIn(b'outcome="fallback"', (await self.request("/metrics"))[1])
+        self.assertIn(counter + b" 1.0", (await self.request("/metrics"))[1])
 
     async def test_validation_rejects_bad_and_oversized_requests(self) -> None:
         for payload in (
