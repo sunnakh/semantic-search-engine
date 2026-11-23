@@ -130,6 +130,8 @@ The comparison reports the original embedding rankings under `qwen_embedding` an
 
 The adapted 9B model was trained for two epochs and evaluated on BM25 shortlists across the full validation split. The hybrid workflow has a one-claim smoke check. The search API serves the registered MiniLM bundle. The **Qwen3-Embedding-0.6B** LoRA experiment runs through `make train-qwen-embedding` and `make evaluate-qwen-embedding`.
 
+Full evaluations record an offline gate in the comparison report and exit with status `2` when the reranker falls below its metric floors. The BM25 workflow compares against BM25 and frozen Qwen3.5-9B. The hybrid workflow compares against embedding retrieval alone. Runs with `--query-limit` skip the gate.
+
 ## Measured results
 
 All methods used the same 162 validation claims and 5,183-abstract corpus. The 9B models scored papers shortlisted by BM25.
