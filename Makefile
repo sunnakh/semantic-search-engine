@@ -1,4 +1,4 @@
-.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve ui monitor-quality train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
+.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve release ui monitor-quality train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
 ingest:
 	uv run --locked python -m src.data.ingest
 
@@ -34,6 +34,9 @@ pipeline:
 
 serve:
 	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry --extra serving python -m src.serving.app $(SERVE_ARGS)
+
+release:
+	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry python -m src.serving.control $(RELEASE_ARGS)
 
 ui:
 	uv run --locked --isolated --extra ui python -m streamlit run src/ui/app.py --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false $(UI_ARGS)

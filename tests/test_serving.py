@@ -36,6 +36,11 @@ class FixtureWorker:
         pass
 
 
+class ShadowWorker(FixtureWorker):
+    async def search(self, query: str, top_k: int) -> list["Hit"]:
+        return [Hit("d1", 0.9)]
+
+
 @unittest.skipUnless(SERVING_AVAILABLE, "dense, registry, and serving extras required")
 class SearchTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -148,6 +153,47 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(metadata)["training_commit"], "a" * 40)
         self.assertEqual((await self.request("/api/v1/documents/missing"))[0], 404)
         self.assertEqual((await self.request("/health/ready"))[0], 200)
+
+    async def test_shadow_result_is_measured_but_never_returned(self) -> None:
+        runtime = self.app.state.runtime
+        shadow_metadata = Release(
+            release_id="shadow-release",
+            model_version="2",
+            candidate_id="shadow-candidate",
+            training_commit="b" * 40,
+            dataset_version="dataset",
+            prepared_manifest_sha256="prepared-hash",
+            bundle_manifest_sha256="shadow-bundle",
+            keyword_version="shadow-keyword",
+            bm25_version="shadow-bm25",
+            dense_timeout_ms=500,
+        )
+        runtime.shadow_release = LoadedRelease(
+            shadow_metadata,
+            Path("unused-shadow"),
+            runtime.release.documents,
+            runtime.release.keyword,
+            runtime.release.bm25,
+        )
+        runtime.shadow_dense = ShadowWorker()
+        with self.assertLogs("scifact.predictions", level="INFO") as logs:
+            status, body = await self.request(
+                "/api/v1/search", b'{"query":"Exercise","method":"dense","top_k":1}'
+            )
+            while runtime.shadow_tasks:
+                await asyncio.sleep(0)
+        response = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(response["release_id"], "release")
+        self.assertEqual(response["results"][0]["document_id"], "d2")
+        self.assertTrue(
+            any('"event": "shadow_prediction"' in item for item in logs.output)
+        )
+        _, metrics = await self.request("/metrics")
+        self.assertIn(
+            b'scifact_shadow_requests_total{outcome="success",release_id="shadow-release"} 1.0',
+            metrics,
+        )
 
     async def test_degraded_worker_uses_bm25_and_records_fallback(self) -> None:
         counter = b'scifact_search_requests_total{method="dense",outcome="fallback"}'

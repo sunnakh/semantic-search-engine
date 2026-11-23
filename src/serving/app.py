@@ -33,6 +33,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from ..data.prepared import DEFAULT_PROCESSED_ROOT, load_split
 from ..monitoring.drift import QueryLengthMetrics
 from ..registry.tracking import TRACKING_ROOT
+from .control import ReleaseState, ReleaseStore
 from .release import LoadedRelease, load_release
 from .schemas import (
     SEARCH_PATH,
@@ -89,10 +90,14 @@ class LimitSearchBody:
         await self.app(scope, replay_body, send)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Runtime:
     release: LoadedRelease
     dense: DenseWorker
+    release_state: ReleaseState | None = None
+    shadow_release: LoadedRelease | None = None
+    shadow_dense: DenseWorker | None = None
+    shadow_tasks: set[asyncio.Task[None]] | None = None
 
     async def retrieve(self, payload: SearchRequest) -> tuple[Method, list[Hit]]:
         method = payload.method
@@ -111,25 +116,59 @@ class Runtime:
 def create_app(
     prepared_manifest: Path,
     tracking_root: Path,
-    model_version: int,
+    model_version: int | None,
     dense_timeout_ms: int = 300,
     *,
     drift_token: str | None = None,
+    release_state_path: Path | None = None,
 ) -> FastAPI:
-    if model_version < 1 or dense_timeout_ms < 1:
-        raise ValueError("model version and dense timeout must be positive")
+    if (model_version is None) == (release_state_path is None):
+        raise ValueError("select exactly one model version or release state")
+    if (model_version is not None and model_version < 1) or dense_timeout_ms < 1:
+        raise ValueError("model versions and timeouts must be positive")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with TemporaryDirectory(prefix="scifact-release-") as directory:
+            state = (
+                ReleaseStore(release_state_path).read() if release_state_path else None
+            )
+            active_version = state.active.model_version if state else model_version
+            active_timeout = (
+                state.active.dense_timeout_ms if state else dense_timeout_ms
+            )
+            assert active_version is not None
             release = await asyncio.to_thread(
                 load_release,
                 prepared_manifest,
                 tracking_root,
-                model_version,
-                dense_timeout_ms,
-                Path(directory),
+                active_version,
+                active_timeout,
+                Path(directory) / "active",
             )
+            if state and release.metadata.release_id != state.active.release_id:
+                raise ValueError("active release pointer does not match the registry")
+            shadow_release = None
+            if state and state.shadow:
+                shadow_release = await asyncio.to_thread(
+                    load_release,
+                    prepared_manifest,
+                    tracking_root,
+                    state.shadow.model_version,
+                    state.shadow.dense_timeout_ms,
+                    Path(directory) / "shadow",
+                )
+                if shadow_release.metadata.release_id != state.shadow.release_id:
+                    raise ValueError(
+                        "shadow release pointer does not match the registry"
+                    )
+                if (
+                    shadow_release.metadata.dataset_version
+                    != release.metadata.dataset_version
+                    or shadow_release.metadata.prepared_manifest_sha256
+                    != release.metadata.prepared_manifest_sha256
+                ):
+                    raise ValueError("active and shadow releases must use one snapshot")
             if drift is not None:
                 training = await asyncio.to_thread(
                     load_split, prepared_manifest, "train"
@@ -143,11 +182,32 @@ def create_app(
                         "the drift reference must match the served snapshot"
                     )
                 drift.configure(training, release.metadata.release_id)
-            dense = await DenseWorker.start(release.bundle, dense_timeout_ms)
-            app.state.runtime = Runtime(release, dense)
+            dense = await DenseWorker.start(release.bundle, active_timeout)
+            shadow_dense = (
+                await DenseWorker.start(
+                    shadow_release.bundle, state.shadow.dense_timeout_ms
+                )
+                if shadow_release
+                else None
+            )
+            app.state.runtime = Runtime(
+                release,
+                dense,
+                state,
+                shadow_release,
+                shadow_dense,
+                set(),
+            )
             try:
                 yield
             finally:
+                runtime: Runtime = app.state.runtime
+                tasks = runtime.shadow_tasks or set()
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                if shadow_dense:
+                    await shadow_dense.close()
                 await dense.close()
 
     app = FastAPI(title="SciFact Search", lifespan=lifespan)
@@ -177,6 +237,53 @@ def create_app(
         "scifact_dense_ready", "Dense worker readiness", registry=metrics
     )
     worker_health.set_function(lambda: int(app.state.runtime.dense.ready))
+    shadow_searches = Counter(
+        "scifact_shadow_requests",
+        "Shadow retrieval attempts",
+        ("outcome", "release_id"),
+        registry=metrics,
+    )
+    shadow_latency = Histogram(
+        "scifact_shadow_duration_seconds",
+        "Shadow retrieval latency outside the response path",
+        ("release_id",),
+        registry=metrics,
+    )
+
+    async def run_shadow(
+        runtime: Runtime, payload: SearchRequest, request_id: str, query_hash: str
+    ) -> None:
+        shadow = runtime.shadow_release
+        worker = runtime.shadow_dense
+        if shadow is None or worker is None:
+            return
+        start = perf_counter()
+        outcome = "success"
+        document_ids: list[str] = []
+        try:
+            hits = await worker.search(payload.query, payload.top_k)
+            document_ids = [hit.document_id for hit in hits]
+        except DenseUnavailable:
+            outcome = "unavailable"
+        duration = perf_counter() - start
+        release_id = shadow.metadata.release_id
+        shadow_searches.labels(outcome=outcome, release_id=release_id).inc()
+        shadow_latency.labels(release_id=release_id).observe(duration)
+        PREDICTIONS.info(
+            "%s",
+            json.dumps(
+                {
+                    "event": "shadow_prediction",
+                    "request_id": request_id,
+                    "release_id": release_id,
+                    "model_version": shadow.metadata.model_version,
+                    "query_hash": query_hash,
+                    "document_ids": document_ids,
+                    "latency_ms": round(duration * 1000, 3),
+                    "outcome": outcome,
+                }
+            ),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(
@@ -204,6 +311,9 @@ def create_app(
         return {
             **asdict(runtime.release.metadata),
             "methods": {"dense": runtime.dense.ready, "bm25": True, "keyword": True},
+            "release_state": (
+                asdict(runtime.release_state) if runtime.release_state else None
+            ),
         }
 
     @app.get("/api/v1/documents/{document_id}")
@@ -232,6 +342,7 @@ def create_app(
         release = runtime.release
         metadata = release.metadata
         request_id = uuid4().hex
+        query_hash = hmac.digest(hash_key, payload.query.encode(), "sha256").hex()
         effective_method, hits = await runtime.retrieve(payload)
         fallback = effective_method != payload.method
 
@@ -270,9 +381,7 @@ def create_app(
                     "requested_method": payload.method,
                     "method": effective_method,
                     "model_version": version,
-                    "query_hash": hmac.digest(
-                        hash_key, payload.query.encode(), "sha256"
-                    ).hex(),
+                    "query_hash": query_hash,
                     "query_length": len(payload.query),
                     "document_ids": [result.document_id for result in results],
                     "latency_ms": latency_ms,
@@ -280,6 +389,14 @@ def create_app(
                 }
             ),
         )
+        if payload.method == "dense" and runtime.shadow_release is not None:
+            task = asyncio.create_task(
+                run_shadow(runtime, payload, request_id, query_hash),
+                name=f"shadow-{request_id}",
+            )
+            assert runtime.shadow_tasks is not None
+            runtime.shadow_tasks.add(task)
+            task.add_done_callback(runtime.shadow_tasks.discard)
         return SearchResponse(
             method=effective_method,
             model_version=version,
@@ -297,7 +414,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, help="prepared SciFact manifest")
     parser.add_argument("--tracking-root", type=Path, default=TRACKING_ROOT)
-    parser.add_argument("--model-version", type=int, required=True)
+    release = parser.add_mutually_exclusive_group(required=True)
+    release.add_argument("--model-version", type=int)
+    release.add_argument("--release-state", type=Path)
     parser.add_argument("--dense-timeout-ms", type=int, default=300)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -329,6 +448,7 @@ def main() -> None:
             args.model_version,
             args.dense_timeout_ms,
             drift_token=drift_token,
+            release_state_path=args.release_state,
         ),
         host=args.host,
         port=args.port,

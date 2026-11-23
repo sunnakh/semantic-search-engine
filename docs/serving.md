@@ -45,3 +45,59 @@ uv run --locked python -m src.serving.load_test \
 On an Apple M4 Pro with 14 CPU cores and 24 GB RAM, 150 dense searches across 5 concurrent loopback clients produced a server-side p95 of **25.315 ms** against the **500 ms** target. Loopback client p95 was 27.166 ms and throughput was 228.3 requests/s. Ten HTTP searches warmed the service before measurement. Server latency excludes network time and response serialization. The API and worker had observed RSS of approximately 324 MiB and 530 MiB respectively. The run recorded zero HTTP errors and zero fallbacks.
 
 For a local failure drill, identify the test server's `src.serving.worker` child process and send it `SIGKILL`. Repeat the same search with `method` set to `dense` and `bm25`. The drill returned matching BM25 results, marked the dense request as a fallback, and left liveness at 200 and readiness at 503. Restart the test server after the drill.
+
+## Shadow release and rollback
+
+The optional release-state file is the local control-plane pointer. It records
+the active, previous, and shadow model as immutable registry version/release-ID
+pairs. Writes use a file lock, an atomic replacement, and an expected generation
+so two operators cannot silently overwrite one another. Keep this runtime file
+outside Git.
+
+Initialize the pointer with the current champion, then stage a gate-approved
+candidate. Each command prints the new generation.
+
+```sh
+make release RELEASE_ARGS='--state artifacts/release/state.json init --model-version 1'
+make release RELEASE_ARGS='--state artifacts/release/state.json stage --model-version 2 --dense-timeout-ms 500 --expected-generation 1'
+make serve SERVE_ARGS='--release-state artifacts/release/state.json'
+```
+
+For every dense search, the active worker produces the user-visible response.
+The shadow worker runs as a separate process and task with its own timeout. Its
+document IDs, latency, outcome, and lineage are logged under
+`shadow_prediction`; its results can never replace the response. Prometheus
+exports `scifact_shadow_requests_total` and
+`scifact_shadow_duration_seconds`. BM25 and keyword-only requests are not
+shadowed.
+
+After checking shadow health and retrieval-quality evidence, promote the exact
+staged release and restart the API to load the new pointer:
+
+```sh
+make release RELEASE_ARGS='--state artifacts/release/state.json promote --expected-generation 2'
+make serve SERVE_ARGS='--release-state artifacts/release/state.json'
+```
+
+If the release is unhealthy, atomically swap back to the recorded previous
+release and restart. Rollback reuses verified artifacts; it does not retrain or
+rebuild them.
+
+```sh
+make release RELEASE_ARGS='--state artifacts/release/state.json rollback --expected-generation 3'
+make serve SERVE_ARGS='--release-state artifacts/release/state.json'
+```
+
+The API verifies at startup that every pointer still resolves to the recorded
+release ID and that active and shadow releases use the same prepared snapshot.
+Promotion and rollback change only the control-plane pointer; an external
+process supervisor or cloud deployment must perform the restart.
+
+A local drill on November 23, 2026 used registered model 3 as active and model
+4 as shadow. The active response returned five model-3 results while the
+separate shadow worker logged five model-4 document IDs and exported one
+successful shadow request at 5.266 ms. Promotion changed the active pointer to
+model 4 at generation 3; rollback restored model 3 at generation 4. This
+was followed by an API restart that loaded the original model-3 release with no
+shadow. This verifies the manual local control path, not a cloud rollout or an
+automated supervisor-driven restart.
