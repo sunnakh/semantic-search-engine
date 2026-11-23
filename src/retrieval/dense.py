@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -16,6 +17,12 @@ MODEL_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 MAX_SEQUENCE_LENGTH = 256
 BATCH_SIZE = 32
 MODEL_CACHE = Path("artifacts/models/huggingface")
+
+
+@dataclass(frozen=True)
+class DenseHit:
+    document_id: str
+    score: float
 
 
 class Encoder(Protocol):
@@ -129,6 +136,20 @@ class DenseIndex:
             raise ValueError("top_k must be positive")
         if not queries:
             return []
+        _, ranked = self._rank(queries, top_k)
+        return [[self._ids[index] for index in row] for row in ranked]
+
+    def search(self, query: str, top_k: int = 10) -> list[DenseHit]:
+        if top_k < 1:
+            raise ValueError("top_k must be positive")
+        scores, ranked = self._rank([query], top_k)
+        return [
+            DenseHit(self._ids[index], float(scores[0, index])) for index in ranked[0]
+        ]
+
+    def _rank(
+        self, queries: list[str], top_k: int
+    ) -> tuple[NDArray[np.float32], NDArray[np.intp]]:
         query_vectors = unit_embeddings(self._encoder, queries)
         if query_vectors.shape[1] != self.dimensions:
             raise ValueError(
@@ -138,4 +159,4 @@ class DenseIndex:
         scores = query_vectors @ self._vectors.T
         # Columns already follow document ID order, which resolves exact score ties.
         ranked = np.argsort(-scores, axis=1, kind="stable")[:, :top_k]
-        return [[self._ids[index] for index in row] for row in ranked]
+        return scores, ranked

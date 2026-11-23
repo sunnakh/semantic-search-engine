@@ -50,6 +50,10 @@ class DenseIndexTests(unittest.TestCase):
             [["b", "c"], ["b", "c"]],
         )
         self.assertEqual(self.index.rank_queries([]), [])
+        hits = self.index.search("query", top_k=3)
+        self.assertEqual([hit.document_id for hit in hits], ["b", "c", "a"])
+        self.assertAlmostEqual(hits[0].score, 1)
+        self.assertAlmostEqual(hits[2].score, 2**-0.5)
 
     def test_rejects_invalid_query_embeddings(self) -> None:
         with self.assertRaisesRegex(ValueError, "zero or non-finite"):
