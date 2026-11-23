@@ -218,3 +218,43 @@ def evaluate_candidate(
         if candidate[name] < floor
     )
     return GateDecision(reference, metrics, floors, reasons)
+
+
+def evaluate_ranking_gate(
+    candidate_report: Path,
+    data: PreparedSplit,
+    candidate_method: str,
+    baseline_report: Path,
+    baseline_method: str,
+    reference_report: Path | None = None,
+    reference_method: str | None = None,
+) -> GateDecision:
+    """Apply the offline promotion policy to ranking reports without a bundle."""
+    candidate, _ = verified_metrics(candidate_report, data, candidate_method)
+    baseline, _ = verified_metrics(baseline_report, data, baseline_method)
+    reference = baseline
+    reference_name = baseline_method
+    metrics = {
+        "candidate": candidate,
+        baseline_method: baseline,
+    }
+    if reference_report is not None:
+        if reference_method is None:
+            raise ValueError("reference_method is required with reference_report")
+        reference, _ = verified_metrics(reference_report, data, reference_method)
+        reference_name = reference_method
+        metrics[reference_method] = reference
+
+    floors = {
+        "ndcg@10": max(baseline["ndcg@10"], reference["ndcg@10"]),
+        "recall@5": max(
+            0.0,
+            max(baseline["recall@5"], reference["recall@5"]) - RECALL_TOLERANCE,
+        ),
+    }
+    reasons = tuple(
+        f"{name} {candidate[name]:.5f} below {floor:.5f}"
+        for name, floor in floors.items()
+        if candidate[name] < floor
+    )
+    return GateDecision(reference_name, metrics, floors, reasons)

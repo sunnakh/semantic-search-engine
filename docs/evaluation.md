@@ -77,30 +77,4 @@ Evaluation reloads the adapter and re-embeds the complete validation corpus. It 
 
 ## Qwen3.5-9B MLX reranker
 
-On Apple Silicon, use the Qwen3.5-9B MLX 4-bit checkpoint downloaded through LM Studio. The default model directory is `~/.lmstudio/models/lmstudio-community/Qwen3.5-9B-MLX-4bit`. Pass `--model` in `QWEN_ARGS` to use a different location for the same checkpoint.
-
-After `make prepare`, run a short smoke test or train for a full epoch:
-
-```sh
-make train-qwen QWEN_ARGS='--max-steps 2'
-make train-qwen QWEN_ARGS='--epochs 1'
-```
-
-Plain `make train-qwen` runs 100 steps. The 4-bit weights stay frozen, and rank-8 adapters update 139,264 parameters on the last attention block's query and value projections. Each training group supplies a judged relevant paper and a BM25 hard negative. The command prints the step loss and epoch summaries and saves the adapter, checksums, and `epoch_history` under `artifacts/models/qwen-9b-qlora/`.
-
-Set `SCIFACT_RUN` to the manifest path printed by training and evaluate the same BM25 shortlist with and without the adapter:
-
-```sh
-make evaluate-qwen QWEN_ARGS="--run $SCIFACT_RUN"
-```
-
-The full validation run across 162 claims improved nDCG@10 from 0.6763 for frozen Qwen to 0.6986 with the two-epoch adapter. Recall@5 rose from 0.7377 to 0.7438. BM25 supplied the top-10 shortlist in both cases.
-
-To compare embedding retrieval alone with embedding retrieval followed by 9B reranking, reuse the frozen Qwen3-Embedding-0.6B validation report:
-
-```sh
-SCIFACT_CANDIDATES=artifacts/evaluation/qwen3-embedding-0.6b/qwen-validation.json
-make evaluate-qwen QWEN_ARGS="--run $SCIFACT_RUN --candidate-report $SCIFACT_CANDIDATES --query-limit 5"
-```
-
-The embedding evaluation workflow above generates the report if it is missing. Omit `--query-limit 5` to evaluate all claims. Hybrid results are written beside the adapter manifest in `comparison-qwen-embedding-validation.json` for the full run. The hybrid workflow was verified on one validation claim.
+See the [QLoRA workflow](../README.md#fine-tune-qwen35-9b-and-watch-training) for training commands, evaluation, and measured results.

@@ -22,6 +22,7 @@ REGISTRY_AVAILABLE = all(
 if REGISTRY_AVAILABLE:
     import numpy as np
 
+    from src.evaluation.gate import evaluate_ranking_gate
     from src.registry.tracking import BUNDLE_ARTIFACT, MODEL_NAME, LocalRegistry
     from src.training.pipeline import run_pipeline
 
@@ -120,6 +121,21 @@ class GateTests(unittest.TestCase):
             encoding="utf-8",
         )
         return manifest
+
+    def test_ranking_gate_rejects_worse_report(self) -> None:
+        bundle = self.bundle(worse=True).parent
+        decision = evaluate_ranking_gate(
+            bundle / "candidate-validation.json",
+            self.data,
+            "fine_tuned_minilm",
+            bundle / "bm25-validation.json",
+            "bm25",
+            bundle / "frozen_minilm-validation.json",
+            "dense",
+        )
+        self.assertFalse(decision.passed)
+        self.assertEqual(len(decision.reasons), 2)
+        self.assertEqual(decision.reference, "dense")
 
     def test_deliberately_worse_rankings_are_logged_and_never_registered(self) -> None:
         result = run_pipeline(self.prepared, self.registry, self.bundle(worse=True))
