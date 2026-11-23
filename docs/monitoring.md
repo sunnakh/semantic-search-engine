@@ -94,3 +94,32 @@ Grafana plots the two scores, their floors, fallback share, replay success, and 
 ### Local verification
 
 The live replay of MiniLM registry version 3 matched its saved validation report across all 162 claims, with nDCG@10 of 0.7017 and Recall@5 of 0.7716. In a simulated regression, a test proxy returned empty rankings. Both scores fell to zero and their alerts fired. Restoring the original rankings recovered both scores and cleared the alerts.
+
+## Monitor query-length drift
+
+Enable drift monitoring on the pinned API. Generate one random sentinel token for your local session and provide the same value to the API and `make monitor-quality`. In the API terminal:
+
+```sh
+export SCIFACT_SENTINEL_TOKEN="$(openssl rand -hex 32)"
+make serve SERVE_ARGS="--model-version $SCIFACT_MODEL_VERSION --monitor-drift"
+```
+
+If you launch the quality monitor in a second terminal, set the same token there before running it. The drift-enabled API rejects a replay with an absent or mismatched sentinel token. Authenticated sentinel calls still appear in service health and quality measurements. Only other successful searches enter the drift window.
+
+The API rebuilds the reference from the verified training partition in its prepared snapshot. It counts each eligible training claim once, excludes exact test overlaps, and uses trimmed character lengths accepted by the API. The current snapshot contributes 646 claims. The five disjoint buckets are 1–32, 33–64, 65–128, 129–256, and 257–512 characters. The counters and reference carry the served release ID so a window cannot blend releases. The drift metrics expose bucket counts and fractions.
+
+Grafana plots the rolling one-minute query-length distribution, the training reference, the estimated sample count, and the total variation distance. The distance is half the sum of absolute differences between corresponding bucket fractions. A distance of 0.20 means 20% of the distribution would need to move between buckets to match the reference.
+
+## Query-length drift
+
+`SciFactQueryLengthDrift` fires after 15 seconds above 0.20 with at least 100 estimated searches in the one-minute window. The one-minute window, minimum count, and threshold are starting values for the local workload. Query length is a coarse input signal, and training claims and user searches can naturally differ.
+
+1. Check the sample count, the buckets that gained share, and the active release in `/api/v1/models`. Confirm that the alert compares traffic and reference from the same release.
+2. Investigate changes in incoming traffic, replay credentials, or client query formatting. Check the sentinel-quality panel to see whether retrieval quality also changed.
+3. Correct the source of an unintended shift and verify that a populated window returns below the threshold and the alert clears. For a persistent expected shift, review a new representative reference before changing the baseline.
+
+For a local drill, use a separate test API and Prometheus instance. Send more than 100 synthetic queries near 512 characters after Prometheus has scraped the zero counters. Hold the shift long enough for the alert, then send reference-shaped traffic and confirm recovery with enough samples. Prometheus rule tests also cover insufficient traffic and release mismatches.
+
+### Local drift verification
+
+All 162 scheduled sentinel requests completed while the drift counters stayed at zero. In the isolated drill, 160 simulated 512-character searches moved the distance to 1.0000 and fired the alert. Reference-shaped synthetic traffic brought the distance back to 0.0763 with at least 100 estimated samples, which cleared the alert. Grafana returned data for all three drift panels.

@@ -5,7 +5,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from .schemas import SEARCH_PATH, SearchRequest, SearchResponse
+from .schemas import SEARCH_PATH, SENTINEL_HEADER, SearchRequest, SearchResponse
 
 DEFAULT_API_URL = "http://127.0.0.1:8000"
 
@@ -14,12 +14,17 @@ class SearchError(RuntimeError):
     """A failed search with a message suitable for the UI."""
 
 
-def search(api_url: str, payload: SearchRequest) -> SearchResponse:
+def search(
+    api_url: str, payload: SearchRequest, *, sentinel_token: str | None = None
+) -> SearchResponse:
+    headers = {"Content-Type": "application/json"}
+    if sentinel_token is not None:
+        headers[SENTINEL_HEADER] = sentinel_token
     try:
         request = Request(
             api_url.rstrip("/") + SEARCH_PATH,
             data=payload.model_dump_json().encode(),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         with urlopen(request, timeout=5) as response:

@@ -158,6 +158,6 @@ MLFLOW_DISABLE_TELEMETRY=true uv run --locked --isolated \
 - SciFact judgments cover a subset of relevant papers. In-batch negatives can include useful papers that lack a relevance judgment.
 - The split audit flags overlap with official test claims. The official test split is reserved for final evaluation. Validation gains have yet to be tested on that split.
 - Both embedding evaluations used a 256-token cap, which can truncate long abstracts.
-- Retrieval and fault-injection results are local measurements. Researcher time savings, shadow release, rollback, and cloud deployment remain unverified. The [monitoring guide](docs/monitoring.md) covers local service health, retrieval-quality replay, and recovery drills.
+- Retrieval and fault-injection results are local measurements. Researcher time savings, shadow release, rollback, and cloud deployment remain unverified. The [monitoring guide](docs/monitoring.md) covers local service health, retrieval-quality replay, query-length drift, and recovery drills.
 
 For more detail, see the [system requirements](docs/requirements.md), [data contract](docs/data_contracts.md), [evaluation and training guide](docs/evaluation.md), and [serving guide](docs/serving.md).

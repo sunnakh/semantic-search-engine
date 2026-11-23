@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -50,9 +51,13 @@ def replay(api_url: str, data: PreparedSplit) -> Replay:
     corpus_ids = {doc.document_id for doc in data.documents}
     rankings = []
     fallbacks = 0
+    # An explicit marker lets a drift-enabled API reject a misconfigured replay.
+    sentinel_token = os.environ.get("SCIFACT_SENTINEL_TOKEN") or "unconfigured"
     for query_id in sorted(data.queries):
         response = search(
-            api_url, SearchRequest(query=data.queries[query_id], top_k=CUTOFF)
+            api_url,
+            SearchRequest(query=data.queries[query_id], top_k=CUTOFF),
+            sentinel_token=sentinel_token,
         )
         if response.release_id != release_id:
             raise ValueError("the served release changed during sentinel replay")

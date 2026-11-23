@@ -30,11 +30,13 @@ from prometheus_client import (
 )
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from ..data.prepared import DEFAULT_PROCESSED_ROOT
+from ..data.prepared import DEFAULT_PROCESSED_ROOT, load_split
+from ..monitoring.drift import QueryLengthMetrics
 from ..registry.tracking import TRACKING_ROOT
 from .release import LoadedRelease, load_release
 from .schemas import (
     SEARCH_PATH,
+    SENTINEL_HEADER,
     DocumentResponse,
     Method,
     SearchHit,
@@ -111,6 +113,8 @@ def create_app(
     tracking_root: Path,
     model_version: int,
     dense_timeout_ms: int = 300,
+    *,
+    drift_token: str | None = None,
 ) -> FastAPI:
     if model_version < 1 or dense_timeout_ms < 1:
         raise ValueError("model version and dense timeout must be positive")
@@ -126,6 +130,19 @@ def create_app(
                 dense_timeout_ms,
                 Path(directory),
             )
+            if drift is not None:
+                training = await asyncio.to_thread(
+                    load_split, prepared_manifest, "train"
+                )
+                if (
+                    training.dataset_version != release.metadata.dataset_version
+                    or training.manifest_sha256
+                    != release.metadata.prepared_manifest_sha256
+                ):
+                    raise ValueError(
+                        "the drift reference must match the served snapshot"
+                    )
+                drift.configure(training, release.metadata.release_id)
             dense = await DenseWorker.start(release.bundle, dense_timeout_ms)
             app.state.runtime = Runtime(release, dense)
             try:
@@ -138,6 +155,7 @@ def create_app(
     query_key = os.environ.get("SCIFACT_QUERY_HASH_KEY")
     hash_key = query_key.encode() if query_key else secrets.token_bytes(32)
     metrics = CollectorRegistry()
+    drift = QueryLengthMetrics(metrics) if drift_token is not None else None
     searches = Counter(
         "scifact_search_requests",
         "Validated search requests",
@@ -201,7 +219,14 @@ def create_app(
         return Response(generate_latest(metrics), media_type=CONTENT_TYPE_LATEST)
 
     @app.post(SEARCH_PATH)
-    async def search(payload: SearchRequest) -> SearchResponse:
+    async def search(payload: SearchRequest, request: Request) -> SearchResponse:
+        marker = request.headers.get(SENTINEL_HEADER)
+        if (
+            drift_token is not None
+            and marker is not None
+            and not hmac.compare_digest(drift_token.encode(), marker.encode())
+        ):
+            raise HTTPException(status_code=403, detail="invalid sentinel token")
         start = perf_counter()
         runtime: Runtime = app.state.runtime
         release = runtime.release
@@ -232,6 +257,8 @@ def create_app(
         searches.labels(
             method=payload.method, outcome="fallback" if fallback else "success"
         ).inc()
+        if drift is not None and marker is None:
+            drift.observe(len(payload.query))
         latency_ms = round(duration * 1000, 3)
         PREDICTIONS.info(
             "%s",
@@ -274,7 +301,15 @@ def main() -> None:
     parser.add_argument("--dense-timeout-ms", type=int, default=300)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--monitor-drift", action="store_true")
     args = parser.parse_args()
+    drift_token = (
+        os.environ.get("SCIFACT_SENTINEL_TOKEN") if args.monitor_drift else None
+    )
+    if args.monitor_drift and len(drift_token or "") < 32:
+        parser.error(
+            "set SCIFACT_SENTINEL_TOKEN to a random token of at least 32 characters"
+        )
     manifest = args.manifest
     if manifest is None:
         manifests = sorted(DEFAULT_PROCESSED_ROOT.glob("*/manifest.json"))
@@ -289,7 +324,11 @@ def main() -> None:
     PREDICTIONS.propagate = False
     uvicorn.run(
         create_app(
-            manifest, args.tracking_root, args.model_version, args.dense_timeout_ms
+            manifest,
+            args.tracking_root,
+            args.model_version,
+            args.dense_timeout_ms,
+            drift_token=drift_token,
         ),
         host=args.host,
         port=args.port,

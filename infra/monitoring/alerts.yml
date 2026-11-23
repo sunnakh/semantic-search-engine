@@ -25,3 +25,30 @@ groups:
         annotations:
           summary: "SciFact sentinel {{ $labels.metric }} is below its approved floor"
           runbook: docs/monitoring.md#sentinel-quality-low
+  - name: scifact-query-length-drift
+    rules:
+      - record: scifact:query_length_window_requests
+        expr: increase(scifact_query_length_requests_total{job="scifact-search"}[1m])
+      - record: scifact:query_length_window_count
+        expr: sum without (bucket) (scifact:query_length_window_requests)
+      - record: scifact:query_length_window_fraction
+        expr: |
+          scifact:query_length_window_requests
+          / ignoring (bucket) group_left () (scifact:query_length_window_count > 0)
+      - record: scifact:query_length_total_variation
+        expr: |
+          0.5 * sum without (bucket) (
+            abs(scifact:query_length_window_fraction
+              - scifact_query_length_reference_fraction{job="scifact-search"})
+          )
+      - alert: SciFactQueryLengthDrift
+        expr: |
+          scifact:query_length_total_variation > 0.20
+          and scifact:query_length_window_count >= 100
+          and on (job, instance) up{job="scifact-search"} == 1
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: Search query lengths differ from the training reference
+          runbook: docs/monitoring.md#query-length-drift
