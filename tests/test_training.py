@@ -55,7 +55,9 @@ class QwenMlxRefactorTests(unittest.TestCase):
             )
             (model / "tokenizer.json").write_text("{}", encoding="utf-8")
             hashes = checkpoint_hashes(model)
-            self.assertEqual(set(hashes), {"config.json", "tokenizer.json", "weights.safetensors"})
+            self.assertEqual(
+                set(hashes), {"config.json", "tokenizer.json", "weights.safetensors"}
+            )
 
     def test_training_examples_alternate_positive_and_negative(self) -> None:
         positive = Document("d1", "Positive", "text")
@@ -65,7 +67,9 @@ class QwenMlxRefactorTests(unittest.TestCase):
         first = next(examples)
         second = next(examples)
         self.assertEqual((first[0], first[1].document_id, first[2]), ("claim", "d1", 1))
-        self.assertEqual((second[0], second[1].document_id, second[2]), ("claim", "d2", 0))
+        self.assertEqual(
+            (second[0], second[1].document_id, second[2]), ("claim", "d2", 0)
+        )
 
     def test_scorer_resolves_single_yes_and_no_tokens(self) -> None:
         scorer = RelevanceScorer(FakeTokenizer())

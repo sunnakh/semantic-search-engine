@@ -185,7 +185,7 @@ def create_app(
             dense = await DenseWorker.start(release.bundle, active_timeout)
             shadow_dense = (
                 await DenseWorker.start(
-                    shadow_release.bundle, state.shadow.dense_timeout_ms
+                    shadow_release.bundle, shadow_release.metadata.dense_timeout_ms
                 )
                 if shadow_release
                 else None

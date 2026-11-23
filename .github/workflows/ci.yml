@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, types, and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      MLFLOW_DISABLE_TELEMETRY: "true"
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          version: "0.13.5"
+          python-version: "3.13.15"
+          enable-cache: true
+      - run: uv sync --locked --extra dense --extra registry --extra serving --extra ui
+      - run: uv run --locked --no-sync ruff check src tests
+      - run: uv run --locked --no-sync ruff format --check src tests
+      - run: uv run --locked --no-sync mypy
+      - run: uv run --locked --no-sync python -m unittest discover -s tests
+
+  image:
+    name: Build and smoke-test API image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build --tag scifact-api:ci .
+      - run: docker run --rm --network none scifact-api:ci --help
+      - name: Check runtime user and CPU dependencies
+        run: >-
+          docker run --rm --network none --entrypoint /app/.venv/bin/python scifact-api:ci
+          -c 'import os, pyarrow, torch; assert os.getuid() != 0; assert torch.version.cuda is None'
