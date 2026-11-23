@@ -20,6 +20,18 @@ Startup verifies the pinned MLflow version, its passing gate run, the model bund
 
 `/metrics` exports search latency, fallback counts, and dense-worker readiness. Prediction logs contain document IDs, a keyed query hash, query length, release lineage, and latency. To correlate hashes across restarts, set `SCIFACT_QUERY_HASH_KEY` to a secret shared by the intended instances. Otherwise, each instance generates its own key at startup.
 
+## Browser search UI
+
+With the API running, open a second terminal in the same project directory.
+
+```sh
+make ui
+```
+
+Open [SciFact Search](http://127.0.0.1:8501). Enter a query, choose a retrieval method or compare dense and BM25 side by side, and click **Search**. Results include the rank, paper title, method-specific score, and expandable abstract. The interface shows when the API falls back to BM25.
+
+The UI calls `http://127.0.0.1:8000` by default. Set `SCIFACT_API_URL` when the API uses a different base URL. To change the UI port, run `make ui UI_ARGS='--server.port 8502'`.
+
 ## Local verification
 
 With the server running, set `SCIFACT_MANIFEST` to the path of the same manifest used at startup.
