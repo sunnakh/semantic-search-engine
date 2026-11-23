@@ -1,4 +1,4 @@
-.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve ui
+.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve ui train-qwen-embedding evaluate-qwen-embedding
 ingest:
 	uv run --locked python -m src.data.ingest
 
@@ -16,6 +16,12 @@ dense-baseline:
 
 train-candidate:
 	uv run --locked --extra dense python -m src.training.candidate
+
+train-qwen-embedding:
+	uv run --locked --isolated --extra dense --extra qwen python -m src.training.qwen_lora train $(QWEN_ARGS)
+
+evaluate-qwen-embedding:
+	uv run --locked --isolated --extra dense --extra qwen python -m src.training.qwen_lora evaluate $(QWEN_ARGS)
 
 pipeline:
 	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry python -m src.training.pipeline

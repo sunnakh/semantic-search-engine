@@ -1,10 +1,12 @@
 """Fine-tune a dual encoder on SciFact's judged query-document pairs."""
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
 from sentence_transformers import SentenceTransformer
+from sentence_transformers.util import batch_to_device
 from torch import Tensor
 from torch.nn.functional import normalize
 
@@ -30,8 +32,16 @@ def contrastive_loss(logits: Tensor, positives: Tensor) -> Tensor:
 
 
 def fit_candidate(
-    model: SentenceTransformer, data: PreparedSplit, config: TrainingConfig
+    model: SentenceTransformer,
+    data: PreparedSplit,
+    config: TrainingConfig,
+    *,
+    query_prompt: str | None = None,
+    max_steps: int | None = None,
+    on_step: Callable[[int, float], None] | None = None,
 ) -> dict[str, int | float]:
+    if max_steps is not None and max_steps < 1:
+        raise ValueError("max_steps must be positive")
     torch.manual_seed(config.seed)
     rng = random.Random(config.seed)
     documents = {doc.document_id: embedding_text(doc) for doc in data.documents}
@@ -42,9 +52,13 @@ def fit_candidate(
         if query_id not in excluded
         for document_id in relevant
     )
+    trainable = [
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    ]
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
+        trainable, lr=config.learning_rate, weight_decay=config.weight_decay
     )
+    device = model.device
     model.train()
     examples = steps = 0
     total_loss = 0.0
@@ -66,25 +80,42 @@ def fit_candidate(
                 continue
 
             optimizer.zero_grad(set_to_none=True)
-            queries = model(model.preprocess([data.queries[qid] for qid in query_ids]))
-            passages = model(
-                model.preprocess([documents[doc_id] for doc_id in document_ids])
+            queries = model(
+                batch_to_device(
+                    model.preprocess(
+                        [data.queries[qid] for qid in query_ids], prompt=query_prompt
+                    ),
+                    device,
+                )
             )
-            query_vectors = normalize(queries["sentence_embedding"], dim=1)
-            document_vectors = normalize(passages["sentence_embedding"], dim=1)
+            passages = model(
+                batch_to_device(
+                    model.preprocess([documents[doc_id] for doc_id in document_ids]),
+                    device,
+                )
+            )
+            query_vectors = normalize(queries["sentence_embedding"].float(), dim=1)
+            document_vectors = normalize(passages["sentence_embedding"].float(), dim=1)
             logits = query_vectors @ document_vectors.T / config.temperature
-            loss = contrastive_loss(logits, positives)
+            loss = contrastive_loss(logits, positives.to(device))
             if not torch.isfinite(loss):
                 raise ValueError("non-finite contrastive training loss")
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
-                model.parameters(), config.max_grad_norm, error_if_nonfinite=True
+                trainable, config.max_grad_norm, error_if_nonfinite=True
             )
             optimizer.step()
 
             examples += len(query_ids)
             steps += 1
-            total_loss += loss.item() * len(query_ids)
+            loss_value = loss.item()
+            total_loss += loss_value * len(query_ids)
+            if on_step is not None:
+                on_step(steps, loss_value)
+            if steps == max_steps:
+                break
+        if steps == max_steps:
+            break
 
     if not steps:
         raise ValueError(
