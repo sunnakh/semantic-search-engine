@@ -55,6 +55,8 @@ make serve SERVE_ARGS="--model-version $SCIFACT_MODEL_VERSION"
 
 In a second terminal in the same directory, run `make ui` and open [SciFact Search](http://127.0.0.1:8501). Try **exercise and heart health** in compare mode. The [API playground](http://127.0.0.1:8000/docs) is also available.
 
+To serve a registered model from a local container, see [Run the API in Docker](docs/serving.md#run-the-api-in-docker).
+
 Each checkout has its own local registry by default. If an API is already running on port 8000, check [readiness](http://127.0.0.1:8000/health/ready) and [model metadata](http://127.0.0.1:8000/api/v1/models) to identify it. To start your API on port 8001, use:
 
 ```sh

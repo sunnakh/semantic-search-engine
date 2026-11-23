@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!src/
+!src/**/
+!src/**/*.py

@@ -20,6 +20,33 @@ Startup verifies the pinned MLflow version, its passing gate run, the model bund
 
 `/metrics` exports search latency, fallback counts, and dense-worker readiness. Prediction logs contain document IDs, a keyed query hash, query length, release lineage, and latency. To correlate hashes across restarts, set `SCIFACT_QUERY_HASH_KEY` to a secret shared by the intended instances. Otherwise, each instance generates its own key at startup.
 
+## Run the API in Docker
+
+Build from the repository root after preparing SciFact and registering a model with `make pipeline`. Set `SCIFACT_MODEL_VERSION` to its `registered_version`.
+
+```sh
+docker build --tag scifact-api:local .
+SCIFACT_MODEL_VERSION=3
+project_root=$(pwd -P)
+tracking_root="$project_root/artifacts/mlflow"
+docker run --rm --init --read-only --tmpfs /tmp \
+  --publish 127.0.0.1:8001:8000 \
+  --mount "type=bind,source=$project_root/data/processed,target=/app/data/processed,readonly" \
+  --mount "type=bind,source=$tracking_root,target=$tracking_root,readonly" \
+  scifact-api:local --tracking-root "$tracking_root" --model-version "$SCIFACT_MODEL_VERSION"
+```
+
+The local MLflow registry stores absolute artifact paths, so the registry mount uses the same absolute path inside the container. Use the directory where the registry was created. If several prepared snapshots are mounted, pass `--manifest /app/data/processed/scifact/<dataset-version>/manifest.json`.
+
+```sh
+curl -fsS http://127.0.0.1:8001/health/ready
+curl -fsS http://127.0.0.1:8001/api/v1/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"exercise and heart health","method":"dense","top_k":5}'
+```
+
+The health check probes dense readiness on the container's port 8000. Stop the container with Ctrl+C. To use the local UI, run `SCIFACT_API_URL=http://127.0.0.1:8001 make ui` in another terminal.
+
 ## Browser search UI
 
 With the API running, open a second terminal in the same project directory.
