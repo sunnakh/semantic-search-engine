@@ -1,0 +1,41 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 5s
+
+tests:
+  - name: worker failure fires after the hold and clears after recovery
+    interval: 5s
+    input_series:
+      - series: 'up{job="scifact-search",instance="api:8000"}'
+        values: "1 1 1 1 1 1"
+      - series: 'scifact_dense_ready{job="scifact-search",instance="api:8000"}'
+        values: "1 0 0 0 0 1"
+    alert_rule_test:
+      - eval_time: 0s
+        alertname: SciFactDenseWorkerUnavailable
+      - eval_time: 15s
+        alertname: SciFactDenseWorkerUnavailable
+      - eval_time: 20s
+        alertname: SciFactDenseWorkerUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: scifact-search
+              instance: api:8000
+              severity: warning
+            exp_annotations:
+              summary: Dense search worker is unavailable
+              runbook: docs/monitoring.md#dense-worker-unavailable
+      - eval_time: 25s
+        alertname: SciFactDenseWorkerUnavailable
+
+  - name: a scrape failure does not assert that the worker is down
+    interval: 5s
+    input_series:
+      - series: 'up{job="scifact-search",instance="api:8000"}'
+        values: "0x4"
+      - series: 'scifact_dense_ready{job="scifact-search",instance="api:8000"}'
+        values: "0x4"
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: SciFactDenseWorkerUnavailable

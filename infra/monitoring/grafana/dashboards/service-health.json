@@ -1,0 +1,213 @@
+{
+  "uid": "scifact-service-health",
+  "title": "SciFact service health",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "API scrape",
+      "description": "1 means Prometheus can scrape the API.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"scifact-search\"}",
+          "legendFormat": "{{instance}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Dense worker ready",
+      "description": "0 means dense requests can fall back to BM25.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scifact_dense_ready{job=\"scifact-search\"}",
+          "legendFormat": "{{instance}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Search requests by outcome",
+      "description": "Validated search requests per second, grouped by requested method and actual outcome.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method, outcome) (rate(scifact_search_requests_total{job=\"scifact-search\"}[1m]))",
+          "legendFormat": "{{method}} / {{outcome}}",
+          "instant": false,
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Dense fallback share",
+      "description": "Fraction of dense requests served by BM25. Gaps indicate no dense traffic.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(scifact_search_requests_total{job=\"scifact-search\",method=\"dense\",outcome=\"fallback\"}[1m])) / (sum(rate(scifact_search_requests_total{job=\"scifact-search\",method=\"dense\"}[1m])) > 0)",
+          "legendFormat": "BM25 fallback",
+          "instant": false,
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Search latency by requested method",
+      "description": "Server-side retrieval and result assembly. The warm p95 target is 500 ms.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le, method) (rate(scifact_search_duration_seconds_bucket{job=\"scifact-search\"}[1m])))",
+          "legendFormat": "{{method}} p50",
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, method) (rate(scifact_search_duration_seconds_bucket{job=\"scifact-search\"}[1m])))",
+          "legendFormat": "{{method}} p95",
+          "instant": false,
+          "range": true
+        }
+      ]
+    }
+  ]
+}

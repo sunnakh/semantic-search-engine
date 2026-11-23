@@ -1,0 +1,13 @@
+groups:
+  - name: scifact-service-health
+    rules:
+      - alert: SciFactDenseWorkerUnavailable
+        expr: |
+          scifact_dense_ready{job="scifact-search"} == 0
+          and on (job, instance) up{job="scifact-search"} == 1
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: Dense search worker is unavailable
+          runbook: docs/monitoring.md#dense-worker-unavailable

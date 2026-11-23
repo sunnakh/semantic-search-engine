@@ -1,0 +1,10 @@
+apiVersion: 1
+
+datasources:
+  - name: SciFact Prometheus
+    uid: scifact-prometheus
+    type: prometheus
+    access: proxy
+    url: $SCIFACT_PROMETHEUS_URL
+    jsonData:
+      timeInterval: 5s

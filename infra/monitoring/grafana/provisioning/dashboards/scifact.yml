@@ -1,0 +1,8 @@
+apiVersion: 1
+
+providers:
+  - name: SciFact
+    type: file
+    disableDeletion: true
+    options:
+      path: $SCIFACT_GRAFANA_DASHBOARDS
