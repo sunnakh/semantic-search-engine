@@ -1,4 +1,4 @@
-.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline
+.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve
 ingest:
 	uv run --locked python -m src.data.ingest
 
@@ -19,3 +19,6 @@ train-candidate:
 
 pipeline:
 	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry python -m src.training.pipeline
+
+serve:
+	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry --extra serving python -m src.serving.app $(SERVE_ARGS)

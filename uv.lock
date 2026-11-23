@@ -5,10 +5,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'darwin'",
     "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version < '3.14' and sys_platform == 'emscripten'",
     "python_full_version < '3.14' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'darwin'",
     "python_full_version < '3.14' and sys_platform == 'darwin'",
 ]
 
@@ -1996,6 +1996,15 @@ wheels = [
 ]
 
 [[package]]
+name = "prometheus-client"
+version = "0.26.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/73/f1334c29c2af4cd9dba6c7817e61b611bd0215e2eb5565c6064a4de18802/prometheus_client-0.26.0.tar.gz", hash = "sha256:04a91bcf94e2cf74a44a1a874d651a2e853ed354b6e822f3b7487751465d5c2b", size = 92910, upload-time = "2026-07-24T19:36:41.893Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/a3/b69efbf4143b5b9859b977770bbbabcc2796b702fa69dc40271e45cd5a56/prometheus_client-0.26.0-py3-none-any.whl", hash = "sha256:fa93d06737aa02bacd05794768508bb97d2fbee28cb3bca04eaae92f0ca953d6", size = 64494, upload-time = "2026-07-24T19:36:40.854Z" },
+]
+
+[[package]]
 name = "propcache"
 version = "0.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2752,17 +2761,27 @@ dense = [
 registry = [
     { name = "mlflow" },
 ]
+serving = [
+    { name = "fastapi" },
+    { name = "prometheus-client" },
+    { name = "pydantic" },
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", marker = "extra == 'serving'", specifier = ">=0.115,<1" },
     { name = "mlflow", marker = "extra == 'registry'", specifier = ">=3,<4" },
     { name = "numpy", marker = "extra == 'dense'", specifier = ">=2,<3" },
+    { name = "prometheus-client", marker = "extra == 'serving'", specifier = ">=0.20,<1" },
     { name = "pyarrow", specifier = ">=26,<27" },
+    { name = "pydantic", marker = "extra == 'serving'", specifier = ">=2,<3" },
     { name = "sentence-transformers", marker = "extra == 'dense'", specifier = ">=5,<6" },
     { name = "torch", marker = "sys_platform == 'darwin' and extra == 'dense'", specifier = ">=2.6,<3" },
     { name = "torch", marker = "sys_platform != 'darwin' and extra == 'dense'", specifier = ">=2.6,<3", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "uvicorn", marker = "extra == 'serving'", specifier = ">=0.34,<1" },
 ]
-provides-extras = ["dense", "registry"]
+provides-extras = ["dense", "registry", "serving"]
 
 [[package]]
 name = "sentence-transformers"
