@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from ..documents import Document
 
 SEARCH_PATH = "/api/v1/search"
+SENTINEL_HEADER = "X-SciFact-Sentinel"
 MAX_QUERY_LENGTH = 512
 MAX_TOP_K = 50
 Method = Literal["keyword", "bm25", "dense"]

@@ -7,6 +7,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import patch
 
+from src.data.prepared import PreparedSplit
 from src.documents import Document
 from src.retrieval.keyword import KeywordIndex
 from src.retrieval.lexical import BM25Index
@@ -17,6 +18,7 @@ SERVING_AVAILABLE = all(
 if SERVING_AVAILABLE:
     from starlette.types import Message, Scope
 
+    from src.monitoring.drift import reference_counts
     from src.serving.app import MAX_BODY_BYTES, create_app
     from src.serving.release import LoadedRelease, Release
     from src.serving.worker import DenseUnavailable, DenseWorker, Hit
@@ -62,22 +64,40 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             BM25Index(documents),
         )
         self.dense = FixtureWorker()
-        self.app = create_app(root, root, 1)
+        self.training = PreparedSplit(
+            "dataset",
+            "prepared-hash",
+            documents,
+            {"q1": "  a  ", "q2": "x" * 32, "q3": "x" * 33, "excluded": "x" * 512},
+            {},
+            ("excluded",),
+        )
+        self.app = create_app(root, root, 1, drift_token="test-token")
         stack = AsyncExitStack()
         self.addAsyncCleanup(stack.aclose)
         with (
             patch("src.serving.app.load_release", return_value=release),
+            patch("src.serving.app.load_split", return_value=self.training),
             patch.object(DenseWorker, "start", return_value=self.dense),
         ):
             await stack.enter_async_context(self.app.router.lifespan_context(self.app))
 
-    async def request(self, path: str, body: bytes | None = None) -> tuple[int, bytes]:
+    async def request(
+        self,
+        path: str,
+        body: bytes | None = None,
+        *,
+        sentinel_token: bytes | None = None,
+    ) -> tuple[int, bytes]:
+        headers = [(b"content-type", b"application/json")]
+        if sentinel_token is not None:
+            headers.append((b"x-scifact-sentinel", sentinel_token))
         scope: Scope = {
             "type": "http",
             "http_version": "1.1",
             "method": "GET" if body is None else "POST",
             "path": path,
-            "headers": [(b"content-type", b"application/json")],
+            "headers": headers,
             "query_string": b"",
         }
         messages: list[Message] = []
@@ -91,6 +111,25 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         await self.app(scope, receive, send)
         return messages[0]["status"], b"".join(
             message.get("body", b"") for message in messages[1:]
+        )
+
+    async def test_drift_counts_regular_traffic_and_excludes_sentinel(self) -> None:
+        self.assertEqual(reference_counts(self.training), [2, 1, 0, 0, 0])
+        search_path = "/api/v1/search"
+        payload = b'{"query":"  Exercise  ","top_k":1}'
+        self.assertEqual((await self.request(search_path, payload))[0], 200)
+        self.assertEqual(
+            (await self.request(search_path, payload, sentinel_token=b"test-token"))[0],
+            200,
+        )
+        self.assertEqual(
+            (await self.request(search_path, payload, sentinel_token=b"wrong"))[0],
+            403,
+        )
+        _, metrics = await self.request("/metrics")
+        self.assertIn(
+            b'scifact_query_length_requests_total{bucket="1-32",release_id="release"} 1.0\n',
+            metrics,
         )
 
     async def test_dense_returns_scores_documents_and_lineage(self) -> None:

@@ -2,7 +2,7 @@
   "uid": "scifact-service-health",
   "title": "SciFact service health",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": false,
   "refresh": "5s",
   "time": {
@@ -355,6 +355,108 @@
         "type": "prometheus",
         "uid": "scifact-prometheus"
       }
+    },
+    {
+      "id": 10,
+      "title": "Query-length drift",
+      "description": "Total variation from the served release’s training reference. The local alert threshold is 0.20.",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scifact:query_length_total_variation",
+          "legendFormat": "Total variation",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "0.20 + 0 * scifact:query_length_total_variation",
+          "legendFormat": "Alert threshold",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Drift sample count",
+      "description": "Estimated number of completed non-sentinel searches over one minute. The alert requires at least 100.",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scifact:query_length_window_count",
+          "legendFormat": "Requests",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Query-length distribution",
+      "description": "Disjoint character-count buckets for recent search traffic and eligible training claims.",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 8
+      },
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scifact:query_length_window_fraction and on (job, instance, release_id) scifact:query_length_total_variation",
+          "legendFormat": "{{bucket}} recent",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "scifact_query_length_reference_fraction{job=\"scifact-search\"}",
+          "legendFormat": "{{bucket}} reference",
+          "range": true
+        }
+      ]
     }
   ]
 }

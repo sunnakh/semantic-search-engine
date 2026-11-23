@@ -88,3 +88,46 @@ tests:
         alertname: SciFactSentinelQualityLow
       - eval_time: 45s
         alertname: SciFactSentinelQualityLow
+
+  - name: query-length drift requires enough traffic and clears when the window recovers
+    interval: 5s
+    input_series:
+      - series: 'up{job="scifact-search",instance="api:8000"}'
+        values: "1x27"
+      - series: 'scifact_query_length_requests_total{job="scifact-search",instance="api:8000",release_id="active",bucket="1-32"}'
+        values: "0+20x12 240+0x14"
+      - series: 'scifact_query_length_requests_total{job="scifact-search",instance="api:8000",release_id="active",bucket="33-64"}'
+        values: "0x12 0+20x14"
+      - series: 'scifact_query_length_reference_fraction{job="scifact-search",instance="api:8000",release_id="active",bucket="1-32"}'
+        values: "0x27"
+      - series: 'scifact_query_length_reference_fraction{job="scifact-search",instance="api:8000",release_id="active",bucket="33-64"}'
+        values: "1x27"
+    alert_rule_test:
+      - eval_time: 10s
+        alertname: SciFactQueryLengthDrift
+      - eval_time: 1m
+        alertname: SciFactQueryLengthDrift
+        exp_alerts:
+          - exp_labels:
+              job: scifact-search
+              instance: api:8000
+              release_id: active
+              severity: warning
+            exp_annotations:
+              summary: Search query lengths differ from the training reference
+              runbook: docs/monitoring.md#query-length-drift
+      - eval_time: 2m15s
+        alertname: SciFactQueryLengthDrift
+
+  - name: window data from a prior release cannot be compared to the current reference
+    interval: 5s
+    input_series:
+      - series: 'up{job="scifact-search",instance="api:8000"}'
+        values: "1x12"
+      - series: 'scifact_query_length_requests_total{job="scifact-search",instance="api:8000",release_id="old",bucket="1-32"}'
+        values: "0+20x12"
+      - series: 'scifact_query_length_reference_fraction{job="scifact-search",instance="api:8000",release_id="new",bucket="1-32"}'
+        values: "0x12"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: SciFactQueryLengthDrift
