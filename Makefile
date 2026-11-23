@@ -1,4 +1,4 @@
-.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve ui train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
+.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve ui monitor-quality train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
 ingest:
 	uv run --locked python -m src.data.ingest
 
@@ -37,3 +37,6 @@ serve:
 
 ui:
 	uv run --locked --isolated --extra ui python -m streamlit run src/ui/app.py --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false $(UI_ARGS)
+
+monitor-quality:
+	uv run --locked --isolated --extra dense --extra serving python -m src.monitoring.sentinel $(MONITOR_ARGS)

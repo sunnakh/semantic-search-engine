@@ -66,3 +66,31 @@ curl -fsS "$SCIFACT_API_URL/api/v1/search" \
 ```
 
 Expect HTTP 503 from readiness and a successful search response with `method: bm25` and `fallback: true`. Check that the alert changes to firing, recover with the pinned restart above, and verify that it clears. Stop the test API, Prometheus, and Grafana when finished.
+
+## Monitor retrieval quality
+
+Start the API and Prometheus using the setup above. Pick the prepared manifest used by the API and the `candidate-validation.json` report from a known-good, gate-approved MiniLM bundle for that snapshot. The candidate's training output contains this report beside its bundle manifest.
+
+```sh
+SCIFACT_MANIFEST=data/processed/scifact/YOUR_DATASET_VERSION/manifest.json
+SCIFACT_REFERENCE=artifacts/models/candidates/YOUR_CANDIDATE_ID/candidate-validation.json
+make monitor-quality MONITOR_ARGS="--manifest $SCIFACT_MANIFEST --reference-report $SCIFACT_REFERENCE"
+```
+
+The job runs immediately, then waits five minutes between replays. Set `--interval-seconds` to shorten the wait for a local drill. If your API uses a different port, pass its base URL as `--api-url`. The exporter listens on `127.0.0.1:9101`, which matches the `scifact-sentinel` scrape target.
+
+Each replay asks the API for ten results per claim on the fixed, labeled validation set. SciFact has 162 claims on the current snapshot. The replay verifies the corpus and release lineage and computes nDCG@10 and Recall@5 from the rankings returned to callers, including any BM25 fallback. The startup check recomputes the reference scores from their saved rankings. The alert floors are the verified reference scores minus 0.02, with a minimum of zero. This is an absolute two-point tolerance for the runtime alert.
+
+Grafana plots the two scores, their floors, fallback share, replay success, and time since the last successful replay. A replay that encounters an error publishes a failed status and withdraws its scores. Use the freshness panel and exporter logs to diagnose missing samples. The replay uses validation labels, so its results measure runtime retrieval on a fixed benchmark. Its search calls appear in API metrics and prediction logs.
+
+## Sentinel quality low
+
+`SciFactSentinelQualityLow` fires per metric when a complete replay stays below its floor for 15 seconds of observation. A single replay can hold that value until the next replay finishes.
+
+1. Check the measured scores, fallback share, worker health, and time since the last successful replay. If the worker is degraded, use the [dense worker runbook](#dense-worker-unavailable).
+2. Use the exporter log to confirm the release ID and dataset version. Compare the served release to the approved reference and inspect which recent release or configuration changed.
+3. If a regression follows a release and persists with a healthy worker, restore the last known-good approved release with its matching prepared manifest. Confirm its lineage in `/api/v1/models`, wait for a complete replay, and check that both scores recover above their floors and the alert clears.
+
+### Local verification
+
+The live replay of MiniLM registry version 3 matched its saved validation report across all 162 claims, with nDCG@10 of 0.7017 and Recall@5 of 0.7716. In a simulated regression, a test proxy returned empty rankings. Both scores fell to zero and their alerts fired. Restoring the original rankings recovered both scores and cleared the alerts.

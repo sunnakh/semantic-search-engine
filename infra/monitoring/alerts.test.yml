@@ -39,3 +39,52 @@ tests:
     alert_rule_test:
       - eval_time: 20s
         alertname: SciFactDenseWorkerUnavailable
+
+  - name: low sentinel quality fires for the affected metric and clears on recovery
+    interval: 5s
+    input_series:
+      - series: 'up{job="scifact-sentinel",instance="sentinel:9101"}'
+        values: "1x5"
+      - series: 'scifact_sentinel_run_ok{job="scifact-sentinel",instance="sentinel:9101"}'
+        values: "1x5"
+      - series: 'scifact_sentinel_score{job="scifact-sentinel",instance="sentinel:9101",metric="ndcg_at_10"}'
+        values: "0.68 0.6 0.6 0.6 0.6 0.7"
+      - series: 'scifact_sentinel_floor{job="scifact-sentinel",instance="sentinel:9101",metric="ndcg_at_10"}'
+        values: "0.68x5"
+      - series: 'scifact_sentinel_score{job="scifact-sentinel",instance="sentinel:9101",metric="recall_at_5"}'
+        values: "0.8x5"
+      - series: 'scifact_sentinel_floor{job="scifact-sentinel",instance="sentinel:9101",metric="recall_at_5"}'
+        values: "0.75x5"
+    alert_rule_test:
+      - eval_time: 15s
+        alertname: SciFactSentinelQualityLow
+      - eval_time: 20s
+        alertname: SciFactSentinelQualityLow
+        exp_alerts:
+          - exp_labels:
+              job: scifact-sentinel
+              instance: sentinel:9101
+              metric: ndcg_at_10
+              severity: warning
+            exp_annotations:
+              summary: SciFact sentinel ndcg_at_10 is below its approved floor
+              runbook: docs/monitoring.md#sentinel-quality-low
+      - eval_time: 25s
+        alertname: SciFactSentinelQualityLow
+
+  - name: a failed replay or scrape does not report low quality
+    interval: 5s
+    input_series:
+      - series: 'up{job="scifact-sentinel",instance="sentinel:9101"}'
+        values: "1x4 0x4"
+      - series: 'scifact_sentinel_run_ok{job="scifact-sentinel",instance="sentinel:9101"}'
+        values: "0x4 1x4"
+      - series: 'scifact_sentinel_score{job="scifact-sentinel",instance="sentinel:9101",metric="ndcg_at_10"}'
+        values: "0x9"
+      - series: 'scifact_sentinel_floor{job="scifact-sentinel",instance="sentinel:9101",metric="ndcg_at_10"}'
+        values: "0.68x9"
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: SciFactSentinelQualityLow
+      - eval_time: 45s
+        alertname: SciFactSentinelQualityLow

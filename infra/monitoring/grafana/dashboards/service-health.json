@@ -2,7 +2,7 @@
   "uid": "scifact-service-health",
   "title": "SciFact service health",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "5s",
   "time": {
@@ -208,6 +208,153 @@
           "range": true
         }
       ]
+    },
+    {
+      "id": 6,
+      "title": "SciFact sentinel quality",
+      "description": "Latest complete validation replay against the pinned reference floors.",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 8
+      },
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scifact_sentinel_score{job=\"scifact-sentinel\"}",
+          "legendFormat": "{{metric}} measured",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "scifact_sentinel_floor{job=\"scifact-sentinel\"}",
+          "legendFormat": "{{metric}} floor",
+          "range": true
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Sentinel replay succeeded",
+      "description": "0 means the latest replay failed or a first result is pending.",
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 8,
+        "h": 4
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scifact_sentinel_run_ok{job=\"scifact-sentinel\"}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      }
+    },
+    {
+      "id": 8,
+      "title": "Time since last successful replay",
+      "gridPos": {
+        "x": 8,
+        "y": 28,
+        "w": 8,
+        "h": 4
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - (scifact_sentinel_last_success_timestamp_seconds{job=\"scifact-sentinel\"} > 0)",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      }
+    },
+    {
+      "id": 9,
+      "title": "Sentinel fallback share",
+      "gridPos": {
+        "x": 16,
+        "y": 28,
+        "w": 8,
+        "h": 4
+      },
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scifact_sentinel_fallback_share{job=\"scifact-sentinel\"}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "scifact-prometheus"
+      }
     }
   ]
 }
