@@ -7,6 +7,7 @@ dependencies = ["pyarrow>=26,<27"]
 [project.optional-dependencies]
 dense = ["numpy>=2,<3", "sentence-transformers>=5,<6", "torch>=2.6,<3"]
 qwen = ["peft>=0.20,<1"]
+qwen-mlx = ["mlx-lm==0.32.2; sys_platform == 'darwin' and platform_machine == 'arm64'"]
 registry = ["mlflow>=3,<4"]
 serving = [
     "fastapi>=0.115,<1",
