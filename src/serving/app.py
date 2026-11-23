@@ -13,7 +13,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from typing import Annotated, Literal
 from uuid import uuid4
 
 import uvicorn
@@ -28,57 +27,23 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..data.prepared import DEFAULT_PROCESSED_ROOT
-from ..documents import Document
 from ..registry.tracking import TRACKING_ROOT
 from .release import LoadedRelease, load_release
+from .schemas import (
+    SEARCH_PATH,
+    DocumentResponse,
+    Method,
+    SearchHit,
+    SearchRequest,
+    SearchResponse,
+)
 from .worker import DenseUnavailable, DenseWorker, Hit
 
-SEARCH_PATH = "/api/v1/search"
 MAX_BODY_BYTES = 8192
 PREDICTIONS = logging.getLogger("scifact.predictions")
-Method = Literal["keyword", "bm25", "dense"]
-
-
-class SearchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    query: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)
-    ]
-    method: Method = "dense"
-    top_k: Annotated[int, Field(ge=1, le=50)] = 5
-
-
-class DocumentResponse(BaseModel):
-    document_id: str
-    title: str
-    abstract: str
-
-    @classmethod
-    def from_document(cls, document: Document) -> "DocumentResponse":
-        return cls(
-            document_id=document.document_id,
-            title=document.title,
-            abstract=document.text,
-        )
-
-
-class SearchHit(DocumentResponse):
-    score: float
-
-
-class SearchResponse(BaseModel):
-    method: Method
-    model_version: str
-    release_id: str
-    request_id: str
-    fallback: bool
-    results: list[SearchHit]
-    latency_ms: float
 
 
 class LimitSearchBody:
