@@ -8,11 +8,13 @@ from mlflow import MlflowClient
 
 from .. import text
 from ..data.integrity import manifest_digest, sha256_file
-from ..data.prepared import load_validation
+from ..data.prepared import PreparedSplit, load_validation
 from ..documents import Document
 from ..evaluation.gate import check_bundle
 from ..registry.tracking import BUNDLE_ARTIFACT, MODEL_NAME
 from ..retrieval import keyword, lexical
+
+DEFAULT_DENSE_TIMEOUT_MS = 300
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,7 @@ class LoadedRelease:
     documents: dict[str, Document]
     keyword: keyword.KeywordIndex
     bm25: lexical.BM25Index
+    registry_run_id: str | None = None
 
 
 def load_release(
@@ -58,15 +61,32 @@ def load_release(
     bundle = Path(
         client.download_artifacts(version.run_id, BUNDLE_ARTIFACT, str(destination))
     )
-    data = load_validation(prepared_manifest)
+    release = load_model_bundle(
+        bundle,
+        load_validation(prepared_manifest),
+        model_version,
+        dense_timeout_ms,
+        registry_run_id=version.run_id,
+    )
+    for key, value in (
+        ("candidate_id", release.metadata.candidate_id),
+        ("dataset_version", release.metadata.dataset_version),
+    ):
+        if version.tags.get(key) != value or run.data.tags.get(key) != value:
+            raise ValueError(f"registry and model bundle disagree on {key}")
+    return release
+
+
+def load_model_bundle(
+    bundle: Path,
+    data: PreparedSplit,
+    model_version: int,
+    dense_timeout_ms: int,
+    *,
+    registry_run_id: str,
+) -> LoadedRelease:
     bundle_manifest = bundle / "manifest.json"
     manifest = check_bundle(bundle_manifest, data)
-    for key in ("candidate_id", "dataset_version"):
-        if (
-            version.tags.get(key) != manifest[key]
-            or run.data.tags.get(key) != manifest[key]
-        ):
-            raise ValueError(f"registry and model bundle disagree on {key}")
     source = manifest.get("source")
     commit = source.get("commit") if isinstance(source, dict) else None
     if not isinstance(commit, str) or not re.fullmatch(
@@ -99,4 +119,5 @@ def load_release(
         {document.document_id: document for document in data.documents},
         keyword.KeywordIndex(data.documents),
         lexical.BM25Index(data.documents),
+        registry_run_id,
     )

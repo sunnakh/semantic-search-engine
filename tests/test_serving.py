@@ -3,6 +3,7 @@ import json
 import sys
 import unittest
 from contextlib import AsyncExitStack
+from dataclasses import replace
 from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import patch
@@ -153,6 +154,36 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(metadata)["training_commit"], "a" * 40)
         self.assertEqual((await self.request("/api/v1/documents/missing"))[0], 404)
         self.assertEqual((await self.request("/health/ready"))[0], 200)
+
+    async def test_portable_startup_uses_exported_timeout_and_drift_snapshot(
+        self,
+    ) -> None:
+        root = Path("relocated-release")
+        release = replace(
+            self.app.state.runtime.release,
+            metadata=replace(
+                self.app.state.runtime.release.metadata, dense_timeout_ms=420
+            ),
+        )
+        app = create_app(
+            None,
+            Path("missing-registry"),
+            None,
+            portable_root=root,
+            drift_token="test-token",
+        )
+        with (
+            patch("src.serving.app.load_release", side_effect=AssertionError),
+            patch("src.serving.app.load_portable_release", return_value=release),
+            patch("src.serving.app.load_split", return_value=self.training) as load,
+            patch.object(DenseWorker, "start", return_value=FixtureWorker()) as start,
+        ):
+            async with app.router.lifespan_context(app):
+                self.assertEqual(
+                    app.state.runtime.release.metadata.dense_timeout_ms, 420
+                )
+                start.assert_awaited_once_with(release.bundle, 420)
+                load.assert_called_once_with(root / "snapshot/manifest.json", "train")
 
     async def test_shadow_result_is_measured_but_never_returned(self) -> None:
         runtime = self.app.state.runtime
