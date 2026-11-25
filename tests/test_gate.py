@@ -3,6 +3,7 @@ import unittest
 from importlib.util import find_spec
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pyarrow as pa
 from pyarrow import parquet
@@ -24,6 +25,7 @@ if REGISTRY_AVAILABLE:
 
     from src.evaluation.gate import evaluate_ranking_gate
     from src.registry.tracking import BUNDLE_ARTIFACT, MODEL_NAME, LocalRegistry
+    from src.serving.portable import export_release, load_portable_release
     from src.training.pipeline import run_pipeline
 
 
@@ -94,6 +96,7 @@ class GateTests(unittest.TestCase):
             "input_manifest_sha256": self.data.manifest_sha256,
             "base_model": base,
             "inference": {"dimensions": 2},
+            "source": {"commit": "a" * 40},
             "model_and_index_sha256": file_hashes(bundle),
         }
         candidate_id = manifest_digest(lineage)
@@ -188,3 +191,52 @@ class GateTests(unittest.TestCase):
             "rejected",
         )
         self.assertIsNone(self.registry.registered_model())
+
+    def test_portable_release_can_move_and_rejects_corruption(self) -> None:
+        tracking = self.root / "tracking"
+        result = run_pipeline(self.prepared, self.registry, self.bundle())
+        self.assertEqual(result.registered_version, "1")
+        exported = export_release(self.prepared, tracking, 1, self.root / "export", 420)
+        with self.assertRaises(FileExistsError):
+            export_release(self.prepared, tracking, 1, exported)
+
+        relocated = exported.rename(self.root / "mounted elsewhere")
+        self.prepared.parent.rename(self.root / "original snapshot moved")
+        with patch("src.serving.release.MlflowClient", side_effect=AssertionError):
+            release = load_portable_release(relocated)
+        self.assertEqual(release.bundle, relocated / "bundle")
+        self.assertEqual(release.registry_run_id, result.run_id)
+        self.assertEqual(release.metadata.model_version, "1")
+        self.assertEqual(release.metadata.training_commit, "a" * 40)
+        self.assertEqual(release.metadata.dataset_version, self.data.dataset_version)
+        self.assertEqual(release.metadata.dense_timeout_ms, 420)
+        self.assertEqual(sorted(release.documents), self.ids)
+
+        manifest_path = relocated / "release.json"
+        manifest = json.loads(manifest_path.read_text())
+        original_manifest = manifest_path.read_bytes()
+        manifest["release"]["training_commit"] = "b" * 40
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "lineage does not match"):
+            load_portable_release(relocated)
+        manifest_path.write_bytes(original_manifest)
+
+        link = relocated / "linked-snapshot"
+        link.symlink_to(relocated / "snapshot", target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "regular artifact"):
+            load_portable_release(relocated)
+        link.unlink()
+
+        index = release.bundle / "index/vectors.npy"
+        index.write_bytes(b"corrupted")
+        with self.assertRaisesRegex(ValueError, "portable release checksum mismatch"):
+            load_portable_release(relocated)
+
+    def test_portable_export_requires_a_passing_registry_run(self) -> None:
+        result = run_pipeline(self.prepared, self.registry, self.bundle())
+        self.assertEqual(result.registered_version, "1")
+        self.registry.client.set_tag(result.run_id, "gate.status", "rejected")
+        destination = self.root / "export"
+        with self.assertRaisesRegex(ValueError, "passing gate run"):
+            export_release(self.prepared, self.root / "tracking", 1, destination)
+        self.assertFalse(destination.exists())

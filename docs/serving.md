@@ -22,21 +22,20 @@ Startup verifies the pinned MLflow version, its passing gate run, the model bund
 
 ## Run the API in Docker
 
-Build from the repository root after preparing SciFact and registering a model with `make pipeline`. Set `SCIFACT_MODEL_VERSION` to its `registered_version`.
+From the repository root, prepare SciFact and register a model with `make pipeline`. Use its `registered_version` in the export command. Export verifies the passing MLflow run, the model and index, and the matching prepared snapshot. It copies them into a new directory and records the training commit, data version, MLflow run ID, timeout, and file checksums in `release.json`.
 
 ```sh
+make export-release EXPORT_ARGS='--model-version 3 --output artifacts/models/scifact-release-3'
 docker build --tag scifact-api:local .
-SCIFACT_MODEL_VERSION=3
-project_root=$(pwd -P)
-tracking_root="$project_root/artifacts/mlflow"
 docker run --rm --init --read-only --tmpfs /tmp \
   --publish 127.0.0.1:8001:8000 \
-  --mount "type=bind,source=$project_root/data/processed,target=/app/data/processed,readonly" \
-  --mount "type=bind,source=$tracking_root,target=$tracking_root,readonly" \
-  scifact-api:local --tracking-root "$tracking_root" --model-version "$SCIFACT_MODEL_VERSION"
+  --mount "type=bind,source=$(pwd -P)/artifacts/models/scifact-release-3,target=/release,readonly" \
+  scifact-api:local --portable-release /release
 ```
 
-The local MLflow registry stores absolute artifact paths, so the registry mount uses the same absolute path inside the container. Use the directory where the registry was created. If several prepared snapshots are mounted, pass `--manifest /app/data/processed/scifact/<dataset-version>/manifest.json`.
+The bundle can be moved to a different path or host. Build the image from the same checkout you used for export so the lexical fallback code matches the release lineage. Store and distribute bundles through a trusted location. Checksums detect corruption once you trust the exported manifest. The portable mode serves one pinned release. Use the registry-backed release-state workflow below for local shadow testing.
+
+For a local run without Docker, use `make serve SERVE_ARGS='--portable-release artifacts/models/scifact-release-3'`. Select an explicit snapshot at export with `--manifest` when several exist, or set `--dense-timeout-ms` at export to pin a different timeout. Keep exported bundles out of Git.
 
 ```sh
 curl -fsS http://127.0.0.1:8001/health/ready

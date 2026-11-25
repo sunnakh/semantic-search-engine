@@ -34,7 +34,8 @@ from ..data.prepared import DEFAULT_PROCESSED_ROOT, load_split
 from ..monitoring.drift import QueryLengthMetrics
 from ..registry.tracking import TRACKING_ROOT
 from .control import ReleaseState, ReleaseStore
-from .release import LoadedRelease, load_release
+from .portable import SNAPSHOT_MANIFEST, load_portable_release
+from .release import DEFAULT_DENSE_TIMEOUT_MS, LoadedRelease, load_release
 from .schemas import (
     SEARCH_PATH,
     SENTINEL_HEADER,
@@ -114,18 +115,34 @@ class Runtime:
 
 
 def create_app(
-    prepared_manifest: Path,
+    prepared_manifest: Path | None,
     tracking_root: Path,
     model_version: int | None,
-    dense_timeout_ms: int = 300,
+    dense_timeout_ms: int = DEFAULT_DENSE_TIMEOUT_MS,
     *,
     drift_token: str | None = None,
     release_state_path: Path | None = None,
+    portable_root: Path | None = None,
 ) -> FastAPI:
-    if (model_version is None) == (release_state_path is None):
-        raise ValueError("select exactly one model version or release state")
+    if (
+        sum(
+            source is not None
+            for source in (model_version, release_state_path, portable_root)
+        )
+        != 1
+    ):
+        raise ValueError(
+            "select exactly one model version, release state, or portable release"
+        )
     if (model_version is not None and model_version < 1) or dense_timeout_ms < 1:
         raise ValueError("model versions and timeouts must be positive")
+    if portable_root is not None:
+        if prepared_manifest is not None:
+            raise ValueError("a portable release contains its own prepared manifest")
+        prepared_manifest = portable_root / SNAPSHOT_MANIFEST
+    if prepared_manifest is None:
+        raise ValueError("a prepared manifest is required")
+    data_manifest = prepared_manifest
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -137,22 +154,25 @@ def create_app(
             active_timeout = (
                 state.active.dense_timeout_ms if state else dense_timeout_ms
             )
-            assert active_version is not None
-            release = await asyncio.to_thread(
-                load_release,
-                prepared_manifest,
-                tracking_root,
-                active_version,
-                active_timeout,
-                Path(directory) / "active",
-            )
+            if portable_root is not None:
+                release = await asyncio.to_thread(load_portable_release, portable_root)
+            else:
+                assert active_version is not None
+                release = await asyncio.to_thread(
+                    load_release,
+                    data_manifest,
+                    tracking_root,
+                    active_version,
+                    active_timeout,
+                    Path(directory) / "active",
+                )
             if state and release.metadata.release_id != state.active.release_id:
                 raise ValueError("active release pointer does not match the registry")
             shadow_release = None
             if state and state.shadow:
                 shadow_release = await asyncio.to_thread(
                     load_release,
-                    prepared_manifest,
+                    data_manifest,
                     tracking_root,
                     state.shadow.model_version,
                     state.shadow.dense_timeout_ms,
@@ -170,9 +190,7 @@ def create_app(
                 ):
                     raise ValueError("active and shadow releases must use one snapshot")
             if drift is not None:
-                training = await asyncio.to_thread(
-                    load_split, prepared_manifest, "train"
-                )
+                training = await asyncio.to_thread(load_split, data_manifest, "train")
                 if (
                     training.dataset_version != release.metadata.dataset_version
                     or training.manifest_sha256
@@ -182,7 +200,9 @@ def create_app(
                         "the drift reference must match the served snapshot"
                     )
                 drift.configure(training, release.metadata.release_id)
-            dense = await DenseWorker.start(release.bundle, active_timeout)
+            dense = await DenseWorker.start(
+                release.bundle, release.metadata.dense_timeout_ms
+            )
             shadow_dense = (
                 await DenseWorker.start(
                     shadow_release.bundle, shadow_release.metadata.dense_timeout_ms
@@ -413,11 +433,14 @@ def create_app(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, help="prepared SciFact manifest")
-    parser.add_argument("--tracking-root", type=Path, default=TRACKING_ROOT)
+    parser.add_argument("--tracking-root", type=Path)
     release = parser.add_mutually_exclusive_group(required=True)
     release.add_argument("--model-version", type=int)
     release.add_argument("--release-state", type=Path)
-    parser.add_argument("--dense-timeout-ms", type=int, default=300)
+    release.add_argument(
+        "--portable-release", type=Path, help="exported release directory"
+    )
+    parser.add_argument("--dense-timeout-ms", type=int)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--monitor-drift", action="store_true")
@@ -430,7 +453,15 @@ def main() -> None:
             "set SCIFACT_SENTINEL_TOKEN to a random token of at least 32 characters"
         )
     manifest = args.manifest
-    if manifest is None:
+    if args.portable_release is not None:
+        if any(
+            value is not None
+            for value in (manifest, args.tracking_root, args.dense_timeout_ms)
+        ):
+            parser.error(
+                "a portable release supplies its own manifest and timeout and does not use a registry"
+            )
+    elif manifest is None:
         manifests = sorted(DEFAULT_PROCESSED_ROOT.glob("*/manifest.json"))
         if len(manifests) != 1:
             parser.error(
@@ -444,11 +475,14 @@ def main() -> None:
     uvicorn.run(
         create_app(
             manifest,
-            args.tracking_root,
+            args.tracking_root if args.tracking_root is not None else TRACKING_ROOT,
             args.model_version,
-            args.dense_timeout_ms,
+            args.dense_timeout_ms
+            if args.dense_timeout_ms is not None
+            else DEFAULT_DENSE_TIMEOUT_MS,
             drift_token=drift_token,
             release_state_path=args.release_state,
+            portable_root=args.portable_release,
         ),
         host=args.host,
         port=args.port,
