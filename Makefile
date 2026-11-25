@@ -30,7 +30,7 @@ evaluate-qwen-embedding:
 	uv run --locked --isolated --extra dense --extra qwen python -m src.training.qwen_lora evaluate $(QWEN_ARGS)
 
 pipeline:
-	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry python -m src.training.pipeline
+	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry python -m src.training.pipeline $(PIPELINE_ARGS)
 
 serve:
 	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry --extra serving python -m src.serving.app $(SERVE_ARGS)

@@ -47,7 +47,17 @@ The first run used 739 training pairs across 646 queries and took 47 optimizer s
 
 Run `make pipeline` after `make prepare` to train a candidate, verify its bundle, and record the gate decision. The gate checks artifact hashes, the encoder and index dimensions, the indexed corpus, and the validation queries and judgments. It recomputes metrics from the stored rankings. To evaluate an existing bundle, run `uv run --locked --extra dense --extra registry python -m src.training.pipeline --candidate <candidate-manifest>`.
 
-The reference is the registered `champion` alias when available and frozen MiniLM otherwise. The nDCG@10 floor is the higher score from BM25 and the reference. The Recall@5 floor uses the higher reference or BM25 score with a 0.02 absolute tolerance. A reference report from a different prepared snapshot requires reevaluation before it can be compared.
+For candidate evaluation against a running service, select its API explicitly:
+
+```sh
+make pipeline PIPELINE_ARGS='--champion-api-url http://127.0.0.1:8000'
+```
+
+The gate reads `/api/v1/models`, resolves that active model version from the selected MLflow registry, and verifies the full release lineage and matching prepared snapshot. Its saved validation report supplies the champion metrics. The active worker determines the reference even if the release-state file or MLflow alias points to another version. After promotion or rollback, restart the API before evaluating against the newly selected release. Portable APIs work with the same command when their source model version is available in the selected registry.
+
+The gate rejects registration if the API is unavailable, returns invalid metadata, disagrees with the registry, or changes its active release during evaluation. MLflow records `gate.champion_release_id`, `gate.champion_model_version`, and `gate.champion_run_id`. This check captures the observed champion for this evaluation. A deployment can change after the check, so promotion still requires a separate release decision.
+
+Without `--champion-api-url`, the existing offline workflow uses the registered `champion` alias when available and frozen MiniLM otherwise. Use this for the initial model before a service exists. For all modes, the nDCG@10 floor is the higher score from BM25 and the reference. The Recall@5 floor uses the higher reference or BM25 score with a 0.02 absolute tolerance. A reference report from a different prepared snapshot requires reevaluation before it can be compared.
 
 MLflow stores each attempt in the `scifact-candidates` experiment in `artifacts/mlflow/tracking.db`. Every gate decision records its result and reasons. Passing bundles are registered under `scifact-dense-retriever` with `status=candidate`. Repeating a gate attempt logs another run and reuses the registered version for the same candidate ID. Each registered model version contains an MLflow `MLmodel` descriptor and the exact saved encoder, index, manifest, and reports under `bundle/`. [MLflow Model Registry](https://mlflow.org/docs/latest/ml/model-registry/workflow/)
 

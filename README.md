@@ -46,6 +46,8 @@ make ingest && make prepare && make pipeline
 
 `make prepare` writes a versioned snapshot with partitioned queries and judgments. `make pipeline` fine-tunes MiniLM, builds its index, evaluates the saved bundle, and registers it in local MLflow if it passes the gate.
 
+When updating a running service, evaluate against its loaded model with `make pipeline PIPELINE_ARGS='--champion-api-url http://127.0.0.1:8000'`. The gate verifies that release against the registry and records the comparison model in MLflow.
+
 Set `SCIFACT_MODEL_VERSION` to the `registered_version` printed by your pipeline run. For example, if it prints `3`, start the API with:
 
 ```sh
