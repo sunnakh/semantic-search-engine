@@ -1,5 +1,9 @@
 import json
+import threading
 import unittest
+from contextlib import contextmanager
+from dataclasses import asdict
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.util import find_spec
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,7 +29,9 @@ if REGISTRY_AVAILABLE:
 
     from src.evaluation.gate import evaluate_ranking_gate
     from src.registry.tracking import BUNDLE_ARTIFACT, MODEL_NAME, LocalRegistry
+    from src.serving.control import ReleasePointer, ReleaseStore
     from src.serving.portable import export_release, load_portable_release
+    from src.serving.release import load_release
     from src.training.pipeline import run_pipeline
 
 
@@ -69,8 +75,16 @@ class GateTests(unittest.TestCase):
         )
         self.data = load_validation(self.prepared)
 
-    def bundle(self, *, worse: bool = False) -> Path:
-        bundle = self.root / ("worse" if worse else "candidate")
+    def bundle(
+        self,
+        *,
+        worse: bool = False,
+        name: str | None = None,
+        commit: str = "a" * 40,
+        second_place: bool = False,
+        weaker_baseline: bool = False,
+    ) -> Path:
+        bundle = self.root / (name or ("worse" if worse else "candidate"))
         (bundle / "encoder/1_Pooling").mkdir(parents=True)
         (bundle / "index").mkdir()
         (bundle / "encoder/model.safetensors").write_bytes(b"test fixture checkpoint")
@@ -86,6 +100,8 @@ class GateTests(unittest.TestCase):
         if worse:
             cosine = -cosine
         vectors = np.column_stack((cosine, np.sqrt(1 - cosine**2)))
+        if second_place:
+            vectors[[0, 1]] = vectors[[1, 0]]
         np.save(bundle / "index/vectors.npy", vectors, allow_pickle=False)
         ranked_ids = [self.ids[index] for index in np.argsort(-vectors[:, 0])[:10]]
 
@@ -96,14 +112,17 @@ class GateTests(unittest.TestCase):
             "input_manifest_sha256": self.data.manifest_sha256,
             "base_model": base,
             "inference": {"dimensions": 2},
-            "source": {"commit": "a" * 40},
+            "source": {"commit": commit},
             "model_and_index_sha256": file_hashes(bundle),
         }
         candidate_id = manifest_digest(lineage)
         candidate = evaluate_rankings(self.data, [ranked_ids] * 2, "fine_tuned_minilm")
         candidate["model"] = {"candidate_id": candidate_id}
-        bm25 = evaluate_rankings(self.data, [self.ids[:10]] * 2, "bm25")
-        frozen = evaluate_rankings(self.data, [self.ids[:10]] * 2, "dense")
+        baseline = self.ids[:10]
+        if weaker_baseline:
+            baseline[0], baseline[1] = baseline[1], baseline[0]
+        bm25 = evaluate_rankings(self.data, [baseline] * 2, "bm25")
+        frozen = evaluate_rankings(self.data, [baseline] * 2, "dense")
         frozen["model"] = base
         reports = {"candidate": candidate, "bm25": bm25, "frozen_minilm": frozen}
         for name, report in reports.items():
@@ -124,6 +143,131 @@ class GateTests(unittest.TestCase):
             encoding="utf-8",
         )
         return manifest
+
+    @contextmanager
+    def serving_api(self, payloads):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps(payloads[0]).encode())
+                if len(payloads) > 1:
+                    payloads.pop(0)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}"
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_gate_follows_served_release_after_promotion_and_rollback(self) -> None:
+        candidate = self.bundle()
+        first = run_pipeline(self.prepared, self.registry, candidate)
+        second_candidate = self.bundle(name="second", commit="b" * 40)
+        second = run_pipeline(self.prepared, self.registry, second_candidate)
+        self.assertEqual(
+            (first.registered_version, second.registered_version), ("1", "2")
+        )
+        with TemporaryDirectory() as temporary:
+            releases = [
+                load_release(
+                    self.prepared,
+                    self.root / "tracking",
+                    version,
+                    300,
+                    Path(temporary) / str(version),
+                )
+                for version in (1, 2)
+            ]
+        pointers = [
+            ReleasePointer(
+                int(release.metadata.model_version), 300, release.metadata.release_id
+            )
+            for release in releases
+        ]
+        store = ReleaseStore(self.root / "release.json")
+        store.initialize(pointers[0])
+        # The legacy alias stays on version 2 throughout the drill.
+        self.registry.client.set_registered_model_alias(MODEL_NAME, "champion", "2")
+        for version in (1, 2, 1):
+            if version == 2:
+                store.stage(pointers[1], 1)
+                store.promote(2)
+            elif store.read().generation == 3:
+                store.rollback(3)
+            active = store.read().active
+            metadata = asdict(releases[active.model_version - 1].metadata)
+            # Model the metadata returned after the API reloads the selected release.
+            with self.serving_api([metadata]) as url:
+                result = run_pipeline(
+                    self.prepared, self.registry, candidate, champion_api_url=url
+                )
+            run = self.registry.client.get_run(result.run_id)
+            self.assertFalse(result.reasons)
+            self.assertEqual(run.data.tags["gate.reference"], "champion")
+            self.assertEqual(run.data.tags["gate.champion_model_version"], str(version))
+            self.assertEqual(
+                run.data.tags["gate.champion_release_id"], active.release_id
+            )
+
+    def test_worse_than_served_champion_is_blocked_even_if_baselines_pass(self) -> None:
+        champion = self.bundle(weaker_baseline=True)
+        first = run_pipeline(self.prepared, self.registry, champion)
+        self.assertEqual(first.registered_version, "1")
+        challenger = self.bundle(
+            name="challenger", commit="b" * 40, second_place=True, weaker_baseline=True
+        )
+        baseline_result = run_pipeline(self.prepared, self.registry, challenger)
+        self.assertFalse(baseline_result.reasons)
+        self.registry.client.set_registered_model_alias(MODEL_NAME, "champion", "2")
+        with TemporaryDirectory() as temporary:
+            active = load_release(
+                self.prepared, self.root / "tracking", 1, 300, Path(temporary)
+            ).metadata
+        with (
+            self.serving_api([asdict(active)]) as url,
+            patch.object(self.registry, "register") as register,
+        ):
+            result = run_pipeline(
+                self.prepared, self.registry, challenger, champion_api_url=url
+            )
+        self.assertIsNone(result.registered_version)
+        self.assertTrue(any("ndcg@10" in reason for reason in result.reasons))
+        register.assert_not_called()
+
+    def test_missing_changed_or_mismatched_served_champion_blocks_registration(
+        self,
+    ) -> None:
+        candidate = self.bundle()
+        first = run_pipeline(self.prepared, self.registry, candidate)
+        self.assertEqual(first.registered_version, "1")
+        with TemporaryDirectory() as temporary:
+            active = load_release(
+                self.prepared, self.root / "tracking", 1, 300, Path(temporary)
+            ).metadata
+        metadata = asdict(active)
+        changed = {**metadata, "release_id": "f" * 64}
+        for payloads in ([{}], [changed], [metadata, changed]):
+            with self.subTest(payloads=payloads), self.serving_api(payloads) as url:
+                result = run_pipeline(
+                    self.prepared, self.registry, candidate, champion_api_url=url
+                )
+                self.assertIsNone(result.registered_version)
+                self.assertTrue(result.reasons)
+        with self.serving_api([metadata]) as stopped_url:
+            pass
+        result = run_pipeline(
+            self.prepared, self.registry, candidate, champion_api_url=stopped_url
+        )
+        self.assertIsNone(result.registered_version)
+        self.assertIn("cannot resolve", result.reasons[0])
 
     def test_ranking_gate_rejects_worse_report(self) -> None:
         bundle = self.bundle(worse=True).parent

@@ -45,6 +45,10 @@ class LocalRegistry:
                 )
             )
 
+    @property
+    def tracking_root(self) -> Path:
+        return self._root
+
     def start_run(self) -> str:
         return self.client.create_run(
             self._experiment_id, run_name="candidate evaluation"
