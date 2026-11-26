@@ -106,7 +106,7 @@ def benchmark(manifest_path: Path, method: str = "keyword") -> BenchmarkReport:
 def evaluate_rankings(
     data: PreparedSplit, rankings: list[list[str]], method: str
 ) -> BenchmarkReport:
-    """Score rankings supplied in ascending validation query ID order."""
+    """Score rankings supplied in ascending query ID order for the given split."""
     per_query: list[QueryResult] = []
     for query_id, ranked_ids in zip(sorted(data.queries), rankings, strict=True):
         relevant_ids = data.relevant_ids[query_id]
@@ -125,7 +125,7 @@ def evaluate_rankings(
         "method": method,
         "method_version": 1,
         "unicode_data_version": unicodedata.unidata_version,
-        "split": "validation",
+        "split": data.split,
         "document_count": len(data.documents),
         "query_count": len(per_query),
         "queries_with_relevant_hit_at_10": sum(
