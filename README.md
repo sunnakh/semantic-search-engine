@@ -185,4 +185,4 @@ MLFLOW_DISABLE_TELEMETRY=true HF_HUB_OFFLINE=1 \
 - Both embedding evaluations used a 256-token cap, which can truncate long abstracts.
 - Retrieval and fault-injection results are local measurements. A two-model local drill verified isolated shadow inference plus atomic promotion and rollback pointers. Researcher time savings, supervisor-driven restart, and cloud deployment remain unverified. The [serving guide](docs/serving.md#shadow-release-and-rollback) documents the release workflow and evidence, and the [monitoring guide](docs/monitoring.md) covers local service health, retrieval-quality replay, query-length drift, and recovery drills.
 
-For more detail, see the [system requirements](docs/requirements.md), [data contract](docs/data_contracts.md), [evaluation and training guide](docs/evaluation.md), and [serving guide](docs/serving.md).
+For more detail, see the [MiniLM model card](docs/model-card.md), [system requirements](docs/requirements.md), [data contract](docs/data_contracts.md), [evaluation and training guide](docs/evaluation.md), and [serving guide](docs/serving.md).
