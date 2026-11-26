@@ -30,10 +30,56 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MONITORING_ROOT = PROJECT_ROOT / "infra/monitoring"
 
 
-def check_prerequisites(ports: list[int], grafana_home: Path | None) -> Path:
-    for program in ("prometheus", "grafana"):
-        if shutil.which(program) is None:
-            raise ValueError(f"install {program} before running make demo")
+def start_service(
+    stack: ExitStack,
+    log_path: Path,
+    command: list[str],
+    environment: dict[str, str],
+) -> subprocess.Popen[bytes]:
+    log = stack.enter_context(log_path.open("ab"))
+    process = subprocess.Popen(
+        command,
+        cwd=PROJECT_ROOT,
+        env=environment,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    stack.callback(stop_process, process)
+    return process
+
+
+def write_prometheus_config(run_root: Path, api_port: int, quality_port: int) -> Path:
+    config = run_root / "prometheus.yml"
+    config.write_text(
+        json.dumps(
+            {
+                "global": {
+                    "scrape_interval": "5s",
+                    "scrape_timeout": "3s",
+                    "evaluation_interval": "5s",
+                },
+                "rule_files": [str(MONITORING_ROOT / "alerts.yml")],
+                "scrape_configs": [
+                    {
+                        "job_name": "scifact-search",
+                        "static_configs": [{"targets": [f"127.0.0.1:{api_port}"]}],
+                    },
+                    {
+                        "job_name": "scifact-sentinel",
+                        "static_configs": [{"targets": [f"127.0.0.1:{quality_port}"]}],
+                    },
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return config
+
+
+def check_ports(ports: list[int]) -> None:
     if len(set(ports)) != len(ports):
         raise ValueError("demo services require four distinct ports")
     for port in ports:
@@ -47,6 +93,13 @@ def check_prerequisites(ports: list[int], grafana_home: Path | None) -> Path:
             raise ValueError(
                 f"demo port {port} is unavailable; select another port"
             ) from error
+
+
+def check_prerequisites(ports: list[int], grafana_home: Path | None) -> Path:
+    for program in ("prometheus", "grafana"):
+        if shutil.which(program) is None:
+            raise ValueError(f"install {program} before running make demo")
+    check_ports(ports)
     if grafana_home is None:
         executable = shutil.which("grafana")
         assert executable is not None
@@ -113,16 +166,7 @@ def run_demo(args: argparse.Namespace) -> Path:
     api_url = f"http://127.0.0.1:{args.api_port}"
     prometheus_url = f"http://127.0.0.1:{args.prometheus_port}"
     grafana_url = f"http://127.0.0.1:{args.grafana_port}"
-    config = run_root / "prometheus.yml"
-    config.write_text(
-        "global:\n  scrape_interval: 5s\n  evaluation_interval: 5s\n"
-        f"rule_files:\n  - {json.dumps(str(MONITORING_ROOT / 'alerts.yml'))}\n"
-        "scrape_configs:\n  - job_name: scifact-search\n    static_configs:\n"
-        f"      - targets: ['127.0.0.1:{args.api_port}']\n"
-        "  - job_name: scifact-sentinel\n    static_configs:\n"
-        f"      - targets: ['127.0.0.1:{args.quality_port}']\n",
-        encoding="utf-8",
-    )
+    config = write_prometheus_config(run_root, args.api_port, args.quality_port)
     environment = {
         **os.environ,
         "SCIFACT_SENTINEL_TOKEN": secrets.token_hex(32),
@@ -143,16 +187,9 @@ def run_demo(args: argparse.Namespace) -> Path:
     with ExitStack() as stack:
 
         def start(name: str, command: list[str]) -> None:
-            log = stack.enter_context((run_root / f"{name}.log").open("wb"))
-            process = subprocess.Popen(
-                command,
-                cwd=PROJECT_ROOT,
-                env=environment,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
+            process = start_service(
+                stack, run_root / f"{name}.log", command, environment
             )
-            stack.callback(stop_process, process)
             processes.append(process)
 
         start(
