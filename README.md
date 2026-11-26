@@ -38,7 +38,17 @@ flowchart LR
 
 ## Run locally
 
-Use a Git checkout with Python 3.12 or newer, `uv`, and `make`. The first run needs network access for dependencies, SciFact, and model weights. Run these commands from the project root.
+For the complete local demo, install Python 3.12 or newer, `uv`, `make`, Prometheus, and Grafana, then run from a Git checkout:
+
+```sh
+make demo
+```
+
+The command downloads pinned SciFact inputs, validates and prepares them, trains MiniLM, applies the evaluation gate, registers and exports the release, and starts the API, quality sentinel, Prometheus, and Grafana. It verifies a dense search, a successful labeled replay, both scrape targets, and the provisioned dashboard before printing the URLs. The dashboard allows anonymous viewing on localhost. Press Ctrl+C to stop the demo services. Run `make demo DEMO_ARGS='--check'` to verify the chain and stop automatically.
+
+Each run starts with a separate demo registry and compares against BM25 and frozen MiniLM. Its registry, exported release, and logs stay under `artifacts/models/demo/run-*`. The first run needs network access for dependencies, SciFact, and model weights. The launcher finds Homebrew Grafana automatically. For other installations, set `DEMO_ARGS='--grafana-home /usr/share/grafana'`. Override occupied ports with `--api-port`, `--quality-port`, `--prometheus-port`, and `--grafana-port`. A rejected model or failed startup stops the demo and reports a failure.
+
+To run the data and training stages separately, use these commands from the project root.
 
 ```sh
 make ingest && make prepare && make pipeline
