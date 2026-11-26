@@ -20,6 +20,8 @@ VALIDATION_QUERIES = f"queries/split=validation/{PART_FILE}"
 VALIDATION_QRELS = f"qrels/split=validation/{PART_FILE}"
 TRAIN_QUERIES = f"queries/split=train/{PART_FILE}"
 TRAIN_QRELS = f"qrels/split=train/{PART_FILE}"
+TEST_QUERIES = f"queries/split=test/{PART_FILE}"
+TEST_QRELS = f"qrels/split=test/{PART_FILE}"
 SPLIT_AUDIT = "split_audit.json"
 
 
@@ -31,6 +33,7 @@ class PreparedSplit:
     queries: dict[str, str]
     relevant_ids: dict[str, set[str]]
     exact_test_overlap_ids: tuple[str, ...] = ()
+    split: Literal["train", "validation", "test"] = "validation"
 
 
 def load_validation(manifest_path: Path) -> PreparedSplit:
@@ -42,6 +45,17 @@ def load_split(
 ) -> PreparedSplit:
     if split not in ("train", "validation"):
         raise ValueError("candidate workflows support only train and validation splits")
+    return _load_split(manifest_path, split)
+
+
+def load_test(manifest_path: Path) -> PreparedSplit:
+    """Read official test inputs through a separate final-evaluation entry point."""
+    return _load_split(manifest_path, "test")
+
+
+def _load_split(
+    manifest_path: Path, split: Literal["train", "validation", "test"]
+) -> PreparedSplit:
     manifest_bytes = manifest_path.read_bytes()
     manifest = json.loads(manifest_bytes.decode("utf-8"))
     if not isinstance(manifest, dict) or manifest.get("status") != "ready":
@@ -55,11 +69,11 @@ def load_split(
         raise TypeError("prepared manifest must contain an artifact checksum mapping")
 
     snapshot = manifest_path.parent
-    query_file, qrel_file = (
-        (TRAIN_QUERIES, TRAIN_QRELS)
-        if split == "train"
-        else (VALIDATION_QUERIES, VALIDATION_QRELS)
-    )
+    query_file, qrel_file = {
+        "train": (TRAIN_QUERIES, TRAIN_QRELS),
+        "validation": (VALIDATION_QUERIES, VALIDATION_QRELS),
+        "test": (TEST_QUERIES, TEST_QRELS),
+    }[split]
     inputs = [DOCUMENTS_FILE, query_file, qrel_file]
     if split == "train":
         inputs.append(SPLIT_AUDIT)
@@ -104,4 +118,5 @@ def load_split(
         queries,
         relevant_ids,
         tuple(sorted(overlap)),
+        split,
     )

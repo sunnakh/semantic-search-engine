@@ -49,6 +49,8 @@ def read_object(path: Path) -> dict[str, Any]:
 
 
 def check_bundle(manifest_path: Path, data: PreparedSplit) -> dict[str, Any]:
+    if data.split != "validation":
+        raise ValueError("candidate bundles must be checked against validation inputs")
     manifest = read_object(manifest_path)
     if manifest.get("status") != "evaluated" or manifest.get("manifest_version") != 1:
         raise ValueError("the gate requires an evaluated candidate manifest")
@@ -120,6 +122,8 @@ def verified_metrics(
     data: PreparedSplit,
     method: str,
 ) -> tuple[dict[str, float], dict[str, Any]]:
+    if data.split != "validation":
+        raise ValueError("registration metrics require validation inputs")
     report = read_object(path)
     if (
         report.get("dataset_version") != data.dataset_version

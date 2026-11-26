@@ -161,6 +161,8 @@ All methods used the same 162 validation claims and 5,183-abstract corpus. The 9
 | BM25 + frozen Qwen3.5-9B reranker | 0.6763 | 0.7377 |
 | BM25 + QLoRA Qwen3.5-9B reranker | 0.6986 | 0.7438 |
 
+On the separate **300-query official test**, selected MiniLM version 3 reached **0.6661 nDCG@10**, compared with **0.6451** for frozen MiniLM and **0.6617** for BM25. Excluding 18 overlap-flagged test claims reduced its score to **0.6532**, below BM25's **0.6568**. Fine-tuning improved MiniLM; a clear overall advantage over BM25 is unproven. Run `make test-benchmark TEST_BENCHMARK_ARGS='--model-version 3'` for that registered version, or select your own registry version before inspecting test scores. [Test protocol, full metrics, and lineage](docs/evaluation.md#official-test-results)
+
 MiniLM serving reached **25.3 ms warm server-side p95** on loopback across 150 requests and five concurrent clients on the Apple M4 Pro. A local fault-injection drill killed the dense worker, triggered BM25 fallback, and kept the API live. An API restart restores dense inference. [Serving benchmark and drill](docs/serving.md#local-verification)
 
 ## Verification and limitations
@@ -179,7 +181,7 @@ MLFLOW_DISABLE_TELEMETRY=true HF_HUB_OFFLINE=1 \
 ```
 
 - SciFact judgments cover a subset of relevant papers. In-batch negatives can include useful papers that lack a relevance judgment.
-- The split audit flags overlap with official test claims. The official test split is reserved for final evaluation. Validation gains have yet to be tested on that split.
+- The split audit flags 18 official test claims with development overlap. Separate test results and an overlap-filtered sensitivity check are reported above; future test-informed tuning needs a fresh holdout.
 - Both embedding evaluations used a 256-token cap, which can truncate long abstracts.
 - Retrieval and fault-injection results are local measurements. A two-model local drill verified isolated shadow inference plus atomic promotion and rollback pointers. Researcher time savings, supervisor-driven restart, and cloud deployment remain unverified. The [serving guide](docs/serving.md#shadow-release-and-rollback) documents the release workflow and evidence, and the [monitoring guide](docs/monitoring.md) covers local service health, retrieval-quality replay, query-length drift, and recovery drills.
 

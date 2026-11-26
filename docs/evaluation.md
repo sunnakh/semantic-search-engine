@@ -29,9 +29,43 @@ BM25 improved mean nDCG@10 by 0.16682 over keyword overlap. Pretrained MiniLM im
 
 nDCG@10 discounts each relevant hit by `1 / log2(rank + 1)` and divides by the ideal gain for that query. Recall divides the number of relevant hits within the cutoff by the number of judged relevant abstracts. MRR@10 credits only the first relevant hit. Unjudged results contribute zero gain under benchmark scoring. [BEIR evaluation implementation](https://github.com/beir-cellar/beir/blob/main/beir/retrieval/evaluation.py)
 
-The official test benchmark is reserved for final evaluation. The prepared split audit records overlap between development and test claims that may affect interpretation of eventual test scores. [Data contract](data_contracts.md#prepared-snapshot)
+Official test scores are reported separately below. The prepared split audit records overlap between development and test claims. [Data contract](data_contracts.md#prepared-snapshot)
 
 The sequence limit truncates long inputs. MiniLM's published training mixture includes S2ORC scientific text, so overlap between its training text and SciFact documents is possible. The reported metrics measure retrieval quality on this validation split. [MiniLM training data and input limits](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2#training-data)
+
+## Official test results
+
+After selecting a registered model using development evidence, evaluate it without training or registering another model:
+
+```sh
+make test-benchmark TEST_BENCHMARK_ARGS='--model-version 3'
+```
+
+Use the version printed by your own pipeline when reproducing the workflow; version numbers belong to each local registry. Optional `--manifest`, `--tracking-root`, and `--output` select the snapshot, registry, and evidence directory. The default directory is `artifacts/evaluation/official-test/model-<version>/`. The command writes `selection.json` before opening test labels, then `report.json` with each method's per-query rankings, metrics, lineage, runtime versions, and overlap sensitivity analysis. It validates input and bundle checksums, uses four CPU threads, and performs no optimizer steps or registry writes. Training and registration continue to accept only development inputs.
+
+Identical reruns preserve the evidence files. Different selections or reports cannot overwrite them; use a new `--output` directory when changing the code, model, or snapshot. Subsequent experiments informed by these scores are test-informed development and need a new untouched evaluation set for an independent final claim.
+
+Measured locally on November 26, 2026: the model version **3** selected before this run ranked all **5,183 abstracts for 300 official test claims** in the same prepared snapshot used above. BM25 parameters, the frozen MiniLM revision, and the saved candidate weights were unchanged.
+
+| Method | nDCG@10 | Recall@5 | Recall@10 | MRR@10 | Queries with a relevant hit in top 10 |
+|---|---:|---:|---:|---:|---:|
+| BM25 | 0.66168 | 0.72594 | 0.79094 | 0.62762 | 243 |
+| Frozen MiniLM | 0.64508 | 0.73794 | 0.78333 | 0.60472 | 238 |
+| Fine-tuned MiniLM, version 3 | 0.66611 | 0.74672 | 0.82222 | 0.62111 | 250 |
+
+Fine-tuning improved MiniLM's test nDCG@10 by **0.02103** and Recall@5 by **0.00878**. Its nDCG@10 exceeded BM25 by only **0.00443**, while MRR@10 was lower. Against BM25, it improved nDCG on 72 queries, regressed on 70, and tied on 158. These point estimates do not establish a statistically significant or general improvement over BM25. Qwen experiments were not included in this final test run.
+
+The existing audit flags **18 development/test pairs involving 18 distinct test claims**: two exact normalized matches and 16 near duplicates. Training excludes the development training claim that exactly matches a test claim; an exact match in validation and the near duplicates remain interpretation risks. Excluding all 18 flagged test claims gives this supplementary **282-query** comparison, scored from the same saved rankings:
+
+| Method | nDCG@10 | Recall@5 | Recall@10 | MRR@10 |
+|---|---:|---:|---:|---:|
+| BM25 | 0.65684 | 0.72352 | 0.79178 | 0.62217 |
+| Frozen MiniLM | 0.63663 | 0.72920 | 0.77660 | 0.59663 |
+| Fine-tuned MiniLM, version 3 | 0.65318 | 0.73499 | 0.81442 | 0.60727 |
+
+On this filtered subset, fine-tuning still improves MiniLM, but nDCG@10 is **0.00365 below BM25**. This is a sensitivity check, not a replacement official score or proof that all overlap was removed. The audit covers claim similarity; pretraining overlap with scientific abstracts remains possible.
+
+The measured candidate is `4ce988ac1b3dcd29d345553ab88fa0cb1f25f62b09ce6782b905b28cdc2d8902`, trained at commit `9edd3b86205c2099f4eb7a9f0902a21669dbc0f3`, registered by run `b644b0bd4cd944f08e545f70e82e3693`. Its bundle manifest SHA-256 is `0eb3463a4bc5354023f5034ce364ff4e1b8ac26f07f920e680da3ce3008267e9`. The evaluation records the parent Git commit plus the working source fingerprint (`c11eab77746b1a1ec1a9a77ca5b73cdbd3836567a9c2cbdd2a07f93ba30f234a`) because the benchmark implementation was not yet committed. The local report SHA-256 is `7c891f6c149f46157045e158385bfe1f2592532f51ccd792a1b89951a6859f84`; generated reports and checkpoints stay outside version control.
 
 ## Fine-tuned candidate
 

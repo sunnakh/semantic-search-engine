@@ -2,7 +2,7 @@ import json
 import threading
 import unittest
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.util import find_spec
 from pathlib import Path
@@ -15,8 +15,13 @@ from pyarrow import parquet
 from src.data.integrity import file_hashes, manifest_digest, sha256_file
 from src.data.prepared import (
     DOCUMENTS_FILE,
+    SPLIT_AUDIT,
+    TEST_QRELS,
+    TEST_QUERIES,
     VALIDATION_QRELS,
     VALIDATION_QUERIES,
+    load_split,
+    load_test,
     load_validation,
 )
 from src.evaluation.benchmark import evaluate_rankings, write_report
@@ -27,7 +32,12 @@ REGISTRY_AVAILABLE = all(
 if REGISTRY_AVAILABLE:
     import numpy as np
 
-    from src.evaluation.gate import evaluate_ranking_gate
+    from src.evaluation import final
+    from src.evaluation.gate import (
+        check_bundle,
+        evaluate_ranking_gate,
+        verified_metrics,
+    )
     from src.registry.tracking import BUNDLE_ARTIFACT, MODEL_NAME, LocalRegistry
     from src.serving.control import ReleasePointer, ReleaseStore
     from src.serving.portable import export_release, load_portable_release
@@ -283,6 +293,136 @@ class GateTests(unittest.TestCase):
         self.assertFalse(decision.passed)
         self.assertEqual(len(decision.reasons), 2)
         self.assertEqual(decision.reference, "dense")
+
+    def test_official_test_is_kept_out_of_candidate_workflows(self) -> None:
+        path = self.bundle()
+        with self.assertRaisesRegex(ValueError, "only train and validation"):
+            load_split(self.prepared, "test")
+        data = replace(self.data, split="test")
+        with self.assertRaisesRegex(ValueError, "validation inputs"):
+            check_bundle(path, data)
+        with self.assertRaisesRegex(ValueError, "validation inputs"):
+            verified_metrics(
+                path.parent / "candidate-validation.json", data, "fine_tuned_minilm"
+            )
+
+    def test_final_benchmark_replays_pinned_model_without_changing_registry(
+        self,
+    ) -> None:
+        snapshot = self.prepared.parent
+        for name, rows in (
+            (
+                TEST_QUERIES,
+                [{"query_id": qid, "text": "test claim"} for qid in ("t1", "t2")],
+            ),
+            (
+                TEST_QRELS,
+                [
+                    {"query_id": qid, "document_id": self.ids[index], "relevance": 1}
+                    for index, qid in enumerate(("t1", "t2"))
+                ],
+            ),
+        ):
+            target = snapshot / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            parquet.write_table(pa.Table.from_pylist(rows), target)
+        (snapshot / SPLIT_AUDIT).write_text(
+            json.dumps(
+                {
+                    "official_test_matches": [
+                        {
+                            "left_query_id": "q1",
+                            "right_query_id": "t1",
+                            "match": "exact_normalized",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.prepared.write_text(
+            json.dumps(
+                {
+                    "status": "ready",
+                    "dataset_version": "b" * 64,
+                    "artifact_sha256": {
+                        name: digest
+                        for name, digest in file_hashes(snapshot).items()
+                        if name != "manifest.json"
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.data = load_validation(self.prepared)
+        candidate = self.bundle()
+        result = run_pipeline(self.prepared, self.registry, candidate)
+        self.assertEqual(result.registered_version, "1")
+        before = file_hashes(snapshot)
+        candidate_before = file_hashes(candidate.parent)
+        experiment_id = self.registry.client.get_run(result.run_id).info.experiment_id
+        runs_before = self.registry.client.search_runs([experiment_id])
+        output = self.root / "official-test"
+
+        def open_test(manifest):
+            selection = json.loads((output / "selection.json").read_text())
+            self.assertEqual(selection["release"]["model_version"], "1")
+            return load_test(manifest)
+
+        with (
+            patch.object(final, "load_test", side_effect=open_test),
+            patch.object(
+                final,
+                "dense_rankings",
+                return_value=([self.ids[:10]] * 2, {"id": "fixture"}),
+            ),
+            patch.object(final, "load_minilm"),
+            patch.object(
+                final.MiniLMEncoder,
+                "encode",
+                side_effect=lambda texts: np.tile(
+                    np.array([[1, 0]], dtype=np.float32), (len(texts), 1)
+                ),
+            ),
+        ):
+            report_path = final.run_test_benchmark(
+                self.prepared, self.root / "tracking", 1, output
+            )
+            original = report_path.read_bytes()
+            final.run_test_benchmark(self.prepared, self.root / "tracking", 1, output)
+            self.assertEqual(original, report_path.read_bytes())
+            with patch.object(
+                final, "source_provenance", return_value={"commit": "changed"}
+            ):
+                with self.assertRaisesRegex(ValueError, "refusing to overwrite"):
+                    final.run_test_benchmark(
+                        self.prepared, self.root / "tracking", 1, output
+                    )
+        report = json.loads(original)
+        chosen = report["reports"]["fine_tuned_minilm"]
+        self.assertEqual(chosen["split"], "test")
+        self.assertEqual(chosen["query_count"], 2)
+        self.assertEqual(chosen["metrics"]["mrr@10"], 0.75)
+        sensitivity = report["excluding_audited_overlap"]["fine_tuned_minilm"]
+        self.assertEqual(sensitivity["query_count"], 1)
+        self.assertEqual(sensitivity["metrics"]["mrr@10"], 0.5)
+        self.assertEqual(before, file_hashes(snapshot))
+        self.assertEqual(candidate_before, file_hashes(candidate.parent))
+        self.assertEqual(
+            len(runs_before),
+            len(self.registry.client.search_runs([experiment_id])),
+        )
+        self.assertEqual(
+            len(self.registry.client.search_model_versions(f"name = '{MODEL_NAME}'")), 1
+        )
+        with self.assertRaisesRegex(ValueError, "refusing to overwrite"):
+            final.save_once({"changed": True}, report_path)
+        (snapshot / SPLIT_AUDIT).write_bytes(b"changed")
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            final.overlap_summary(self.prepared, {"t1", "t2"})
+        (snapshot / TEST_QRELS).write_bytes(b"changed")
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            load_test(self.prepared)
 
     def test_deliberately_worse_rankings_are_logged_and_never_registered(self) -> None:
         result = run_pipeline(self.prepared, self.registry, self.bundle(worse=True))

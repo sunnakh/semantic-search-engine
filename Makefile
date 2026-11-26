@@ -1,4 +1,4 @@
-.PHONY: demo ingest prepare baseline baselines dense-baseline train-candidate pipeline serve release export-release ui monitor-quality train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
+.PHONY: demo ingest prepare baseline baselines dense-baseline test-benchmark train-candidate pipeline serve release export-release ui monitor-quality train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
 ingest:
 	uv run --locked python -m src.data.ingest
 
@@ -13,6 +13,9 @@ baselines:
 
 dense-baseline:
 	uv run --locked --extra dense python -m src.evaluation.benchmark --method dense
+
+test-benchmark:
+	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry python -m src.evaluation.final $(TEST_BENCHMARK_ARGS)
 
 train-candidate:
 	uv run --locked --extra dense python -m src.training.candidate
