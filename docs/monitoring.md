@@ -95,6 +95,26 @@ Grafana plots the two scores, their floors, fallback share, replay success, and 
 
 The live replay of MiniLM registry version 3 matched its saved validation report across all 162 claims, with nDCG@10 of 0.7017 and Recall@5 of 0.7716. In a simulated regression, a test proxy returned empty rankings. Both scores fell to zero and their alerts fired. Restoring the original rankings recovered both scores and cleared the alerts.
 
+## Run the complete simulated incident drill
+
+Use two gate-approved registry versions for the same prepared snapshot. Keep the known-good version first. The following example uses local versions 3 and 4:
+
+```sh
+make incident-drill DRILL_ARGS='--good-version 3 --candidate-version 4'
+```
+
+The command creates a separate release-state file and starts its own API, fault proxy, sentinel, and Prometheus. Defaults are localhost ports 18100, 18101, 19101, and 19090. Override them with `--api-port`, `--proxy-port`, `--quality-port`, and `--prometheus-port`. Set `--manifest` and `--tracking-root` to select another snapshot or registry. Prometheus must be installed.
+
+1. Verify the known-good release is loaded, its labeled replay meets both quality floors, and the quality alerts are clear.
+2. Stage and promote the candidate, restart the API, and simulate empty dense rankings for that exact candidate release through the local proxy. The API's dense worker stays healthy.
+3. Wait for `SciFactSentinelQualityLow` to fire for both nDCG@10 and Recall@5 using the existing 15-second alert hold.
+4. Follow the rollback procedure by restoring the previous release pointer and restarting the API. Keep the candidate-specific fault armed throughout recovery.
+5. Verify dense results from the restored release, a complete replay above both floors, and cleared quality alerts. Stop the drill services.
+
+Each run retains logs, the state transitions, and an `evidence.json` timeline under `artifacts/models/incidents/run-*`. The evidence is marked simulated and reports a pass only after recovery and service cleanup. An interrupted or failed drill records failure and stops its services. This exercise simulates a response regression with a proxy and performs real local release transitions, API restarts, sentinel replays, and Prometheus alert evaluation.
+
+The November 26, 2026 local drill promoted registry version 4 from version 3. Both quality alerts fired with zero scores. Rollback restored version 3 at state generation 4 while the version-4 fault remained armed. The 162-claim replay recovered nDCG@10 to 0.7017 and Recall@5 to 0.7716, both alerts cleared, and all drill services stopped. This is a simulated local incident.
+
 ## Monitor query-length drift
 
 Enable drift monitoring on the pinned API. Generate one random sentinel token for your local session and provide the same value to the API and `make monitor-quality`. In the API terminal:
