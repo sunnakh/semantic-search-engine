@@ -1,4 +1,4 @@
-.PHONY: ingest prepare baseline baselines dense-baseline train-candidate pipeline serve release export-release ui monitor-quality train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
+.PHONY: demo ingest prepare baseline baselines dense-baseline train-candidate pipeline serve release export-release ui monitor-quality train-qwen-embedding evaluate-qwen-embedding train-qwen evaluate-qwen
 ingest:
 	uv run --locked python -m src.data.ingest
 
@@ -46,3 +46,6 @@ ui:
 
 monitor-quality:
 	uv run --locked --isolated --extra dense --extra serving python -m src.monitoring.sentinel $(MONITOR_ARGS)
+
+demo:
+	MLFLOW_DISABLE_TELEMETRY=true uv run --locked --extra dense --extra registry --extra serving python -m src.demo $(DEMO_ARGS)
