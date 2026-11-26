@@ -8,7 +8,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project --no-python-downloads \
     --extra dense --extra registry --extra serving
 
-FROM python-base
+FROM python-base AS api
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -26,3 +26,9 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=3 \
     CMD ["/app/.venv/bin/python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready', timeout=2).close()"]
 
 ENTRYPOINT ["/app/.venv/bin/python", "-m", "src.serving.app", "--host", "0.0.0.0"]
+
+FROM api AS cloud
+COPY --chown=scifact:scifact --from=release / /release/
+CMD ["--portable-release", "/release"]
+
+FROM api AS local

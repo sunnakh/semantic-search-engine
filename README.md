@@ -69,6 +69,8 @@ In a second terminal in the same directory, run `make ui` and open [SciFact Sear
 
 To serve a registered model from a local container, see [Run the API in Docker](docs/serving.md#run-the-api-in-docker).
 
+For the Terraform deployment, shadow replay, and teardown procedure, see the [Cloud Run demo](docs/cloud-run.md).
+
 Each checkout has its own local registry by default. If an API is already running on port 8000, check [readiness](http://127.0.0.1:8000/health/ready) and [model metadata](http://127.0.0.1:8000/api/v1/models) to identify it. To start your API on port 8001, use:
 
 ```sh
