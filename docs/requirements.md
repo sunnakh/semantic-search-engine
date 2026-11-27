@@ -1263,9 +1263,7 @@ semanticsearch-ai/
 ├── docs/
 │   ├── requirements.md
 │   ├── architecture.md
-│   ├── data_contracts.md
 │   ├── model_card.md
-│   ├── evaluation.md
 │   └── runbook.md
 |
 ├── Makefile
