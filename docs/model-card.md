@@ -14,7 +14,7 @@ This release ranks scientific abstracts by relevance to a claim or search query.
 | Training commit | `9edd3b86205c2099f4eb7a9f0902a21669dbc0f3` |
 | MLflow run | `b644b0bd4cd944f08e545f70e82e3693` |
 
-Training used one epoch of contrastive fine-tuning over judged SciFact claim–paper pairs, with AdamW at a learning rate of `1e-5`, batch size 16, temperature 0.05, and seed 2026. The training workflow excludes training claims that exactly match official test claims after normalization. Validation guides registration. See the [data contract](data_contracts.md) and [evaluation guide](evaluation.md).
+Training used one epoch of contrastive fine-tuning over judged SciFact claim–paper pairs, with AdamW at a learning rate of `1e-5`, batch size 16, temperature 0.05, and seed 2026. The training workflow excludes training claims that exactly match official test claims after normalization. Validation guides registration. See the [dataset specification](requirements.md#4-dataset-specification).
 
 ## Ranking quality
 
@@ -24,7 +24,7 @@ Training used one epoch of contrastive fine-tuning over judged SciFact claim–p
 | Official test (300 claims) | 0.66168 | 0.64508 | 0.66611 | 0.74672 |
 | Test excluding flagged overlap (282 claims) | 0.65684 | 0.63663 | 0.65318 | 0.73499 |
 
-Fine-tuning improved MiniLM across both test comparisons. The ordering against BM25 changed when 18 claims flagged for development overlap were excluded. The full test also gave BM25 a higher MRR@10 (0.62762 versus 0.62111). These measurements leave the overall ranking advantage over BM25 uncertain. See the [test protocol and lineage](evaluation.md#official-test-results).
+Fine-tuning improved MiniLM across both test comparisons. The ordering against BM25 changed when 18 claims flagged for development overlap were excluded. The full test also gave BM25 a higher MRR@10 (0.62762 versus 0.62111). These measurements leave the overall ranking advantage over BM25 uncertain.
 
 ## Limits and operations
 

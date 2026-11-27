@@ -69,8 +69,6 @@ In a second terminal in the same directory, run `make ui` and open [SciFact Sear
 
 To serve a registered model from a local container, see [Run the API in Docker](docs/serving.md#run-the-api-in-docker).
 
-For the Terraform deployment, shadow replay, and teardown procedure, see the [Cloud Run demo](docs/cloud-run.md).
-
 Each checkout has its own local registry by default. If an API is already running on port 8000, check [readiness](http://127.0.0.1:8000/health/ready) and [model metadata](http://127.0.0.1:8000/api/v1/models) to identify it. To start your API on port 8001, use:
 
 ```sh
@@ -142,7 +140,7 @@ SCIFACT_CANDIDATES=artifacts/evaluation/qwen3-embedding-0.6b/qwen-validation.jso
 make evaluate-qwen QWEN_ARGS="--run $SCIFACT_RUN --candidate-report $SCIFACT_CANDIDATES --query-limit 5"
 ```
 
-The comparison reports the original embedding rankings under `qwen_embedding` and the same papers reranked by your adapter under `qlora_qwen`. Omit `--query-limit 5` for all 162 validation claims. The complete hybrid report is saved as `comparison-qwen-embedding-validation.json` next to the adapter manifest. If the frozen embedding report is missing, the [embedding evaluation workflow](docs/evaluation.md#fine-tune-the-qwen-embedding-model-with-lora) can generate it at the default path.
+The comparison reports the original embedding rankings under `qwen_embedding` and the same papers reranked by your adapter under `qlora_qwen`. Omit `--query-limit 5` for all 162 validation claims. The complete hybrid report is saved as `comparison-qwen-embedding-validation.json` next to the adapter manifest. If the frozen embedding report is missing, run `make evaluate-qwen-embedding` with `--run` pointing to the saved embedding adapter manifest in `QWEN_ARGS`.
 
 The adapted 9B model was trained for two epochs and evaluated on BM25 shortlists across the full validation split. The hybrid workflow has a one-claim smoke check. The search API serves the registered MiniLM bundle. The **Qwen3-Embedding-0.6B** LoRA experiment runs through `make train-qwen-embedding` and `make evaluate-qwen-embedding`.
 
@@ -163,7 +161,7 @@ All methods used the same 162 validation claims and 5,183-abstract corpus. The 9
 | BM25 + frozen Qwen3.5-9B reranker | 0.6763 | 0.7377 |
 | BM25 + QLoRA Qwen3.5-9B reranker | 0.6986 | 0.7438 |
 
-On the separate **300-query official test**, selected MiniLM version 3 reached **0.6661 nDCG@10**, compared with **0.6451** for frozen MiniLM and **0.6617** for BM25. Excluding 18 overlap-flagged test claims reduced its score to **0.6532**, below BM25's **0.6568**. Fine-tuning improved MiniLM; a clear overall advantage over BM25 is unproven. Run `make test-benchmark TEST_BENCHMARK_ARGS='--model-version 3'` for that registered version, or select your own registry version before inspecting test scores. [Test protocol, full metrics, and lineage](docs/evaluation.md#official-test-results)
+On the separate **300-query official test**, selected MiniLM version 3 reached **0.6661 nDCG@10**, compared with **0.6451** for frozen MiniLM and **0.6617** for BM25. Excluding 18 overlap-flagged test claims reduced its score to **0.6532**, below BM25's **0.6568**. Fine-tuning improved MiniLM; a clear overall advantage over BM25 is unproven. Run `make test-benchmark TEST_BENCHMARK_ARGS='--model-version 3'` for that registered version, or select your own registry version before inspecting test scores. [MiniLM ranking results](docs/model-card.md#ranking-quality)
 
 MiniLM serving reached **25.3 ms warm server-side p95** on loopback across 150 requests and five concurrent clients on the Apple M4 Pro. A local fault-injection drill killed the dense worker, triggered BM25 fallback, and kept the API live. An API restart restores dense inference. [Serving benchmark and drill](docs/serving.md#local-verification)
 
@@ -187,4 +185,4 @@ MLFLOW_DISABLE_TELEMETRY=true HF_HUB_OFFLINE=1 \
 - Both embedding evaluations used a 256-token cap, which can truncate long abstracts.
 - Retrieval and fault-injection results are local measurements. A two-model local drill verified isolated shadow inference plus atomic promotion and rollback pointers. Researcher time savings, supervisor-driven restart, and cloud deployment remain unverified. The [serving guide](docs/serving.md#shadow-release-and-rollback) documents the release workflow and evidence, and the [monitoring guide](docs/monitoring.md) covers local service health, retrieval-quality replay, query-length drift, and recovery drills.
 
-For more detail, see the [MiniLM model card](docs/model-card.md), [system requirements](docs/requirements.md), [data contract](docs/data_contracts.md), [evaluation and training guide](docs/evaluation.md), and [serving guide](docs/serving.md).
+For more detail, see the [MiniLM model card](docs/model-card.md), [system requirements](docs/requirements.md), and [serving guide](docs/serving.md).
